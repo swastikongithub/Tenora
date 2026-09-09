@@ -1,0 +1,9 @@
+# This machine has core.autocrlf=true. Without forcing LF here, a Windows
+# checkout of docker-entrypoint.sh would get CRLF line endings, and
+# `#!/bin/sh` on CRLF fails inside the Linux container the backend image
+# runs in (a `$'\r': command not found`-style error) — the exact kind of
+# "works on my machine, breaks on the next clone" bug Docker packaging is
+# supposed to eliminate.
+* text=auto
+docker-entrypoint.sh text eol=lf
+*.sh text eol=lf

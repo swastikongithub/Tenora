@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Tenora</title>
+    <!--
+      Set data-theme before the first paint so there is no flash of the wrong
+      theme (Stage C3b §4.1 / §8). Explicit stored choice wins; otherwise follow
+      the OS setting; default dark if neither is available. src/lib/theme takes
+      over from here once React mounts — this only has to be right for frame 1.
+    -->
+    <script>
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('billing.theme')
+          var theme =
+            stored === 'light' || stored === 'dark'
+              ? stored
+              : window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+          document.documentElement.setAttribute('data-theme', theme)
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark')
+        }
+      })()
+    </script>
+    <!--
+      google-signin-spec.md §1: a deliberate, necessary exception to this
+      project's general preference against third-party CDN dependencies
+      (established for fonts — see frontend/README.md). Google's Identity
+      Services library cannot be self-hosted by its nature (it's the actual
+      sign-in surface, served and updated by Google) — this is not an
+      inconsistency with the font-loading rule, it's the one thing that rule
+      was never meant to cover.
+    -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!--
+      stage-d2-spec.md §4.3: Razorpay Checkout's JS. Same deliberate CDN
+      exception as the Google script above — Checkout is the actual
+      card-entry surface, served and PCI-scoped by Razorpay; it cannot be
+      self-hosted. Loaded once here; useRazorpayCheckout polls for
+      window.Razorpay the way GoogleSignInButton polls for window.google.
+    -->
+    <script src="https://checkout.razorpay.com/v1/checkout.js" async></script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

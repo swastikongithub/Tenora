@@ -1,0 +1,69 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  GLOBAL_PATHS,
+  NO_AUTH_PATHS,
+  isGlobalPath,
+  isNoAuthPath,
+} from '../global-paths'
+
+describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
+  it('is byte-identical to apps/tenants/authentication.py GLOBAL_PATHS', () => {
+    expect([...GLOBAL_PATHS].sort()).toEqual([
+      '/api/auth/google/',
+      '/api/auth/login/',
+      '/api/auth/logout/',
+      '/api/auth/refresh/',
+      '/api/auth/register/',
+      '/api/auth/resend-verification/',
+      '/api/auth/verify-email/',
+      '/api/plans/',
+      '/api/platform/stats/',
+      '/api/platform/tenants/',
+      '/api/tenants/',
+      '/api/tenants/me/',
+      '/api/users/me/',
+    ])
+  })
+
+  it('matches exactly — never by prefix', () => {
+    expect(isGlobalPath('/api/plans/')).toBe(true)
+    expect(isGlobalPath('/api/tenants/')).toBe(true)
+    expect(isGlobalPath('/api/tenants/me/')).toBe(true)
+    expect(isGlobalPath('/api/platform/tenants/')).toBe(true)
+    expect(isGlobalPath('/api/platform/stats/')).toBe(true)
+
+    // A prefix test would wrongly exempt these — the exact reason the backend
+    // set is exact-match (CLAUDE.md).
+    expect(isGlobalPath('/api/plans/archived/')).toBe(false)
+    expect(isGlobalPath('/api/tenants/me/settings/')).toBe(false)
+    expect(isGlobalPath('/api/tenants/me')).toBe(false) // trailing slash matters
+    expect(isGlobalPath('/api/memberships/')).toBe(false)
+    expect(isGlobalPath('/api/subscriptions/current/')).toBe(false)
+  })
+})
+
+describe('NO_AUTH_PATHS', () => {
+  it('is a strict subset of GLOBAL_PATHS', () => {
+    for (const path of NO_AUTH_PATHS) {
+      expect(GLOBAL_PATHS.has(path)).toBe(true)
+    }
+    expect(NO_AUTH_PATHS.size).toBeLessThan(GLOBAL_PATHS.size)
+  })
+
+  it('excludes the globals that are still authenticated', () => {
+    expect(isNoAuthPath('/api/auth/login/')).toBe(true)
+    expect(isNoAuthPath('/api/auth/refresh/')).toBe(true)
+    expect(isNoAuthPath('/api/auth/register/')).toBe(true)
+    expect(isNoAuthPath('/api/auth/verify-email/')).toBe(true)
+    expect(isNoAuthPath('/api/auth/resend-verification/')).toBe(true)
+    expect(isNoAuthPath('/api/auth/google/')).toBe(true)
+    expect(isNoAuthPath('/api/auth/logout/')).toBe(false) // needs the Bearer token
+    expect(isNoAuthPath('/api/users/me/')).toBe(false)
+    expect(isNoAuthPath('/api/tenants/me/')).toBe(false)
+    expect(isNoAuthPath('/api/plans/')).toBe(false)
+    expect(isNoAuthPath('/api/tenants/')).toBe(false)
+    expect(isNoAuthPath('/api/platform/tenants/')).toBe(false) // staff Bearer token
+    expect(isNoAuthPath('/api/platform/stats/')).toBe(false)
+  })
+})

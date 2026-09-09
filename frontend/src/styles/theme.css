@@ -1,0 +1,359 @@
+@import 'tailwindcss';
+
+/* =============================================================================
+   Design tokens — transcribed verbatim from docs/ui-design-specification.md §C.1.
+   This file is the ONLY place raw color / size / shadow values may appear.
+   Every component consumes these via Tailwind utilities (bg-*, text-*, etc.).
+
+   Two themes (Stage C3b). The dark set below lives in `@theme` and is the
+   `:root` default — every value is byte-identical to the dark-only original,
+   nothing here was re-tuned. The light set is a parallel override block under
+   `:root[data-theme='light']` further down. Components never change: the
+   `data-theme` attribute (set pre-paint by the inline script in index.html,
+   then owned by src/lib/theme) decides which value each `var(--color-*)`
+   resolves to. Light values and their measured contrast ratios are recorded in
+   docs/ui-design-specification.md §C.1.
+
+   --------------------------------------------------------------------------
+   Token variable naming
+   --------------------------------------------------------------------------
+   §C.1's token *names* carry a role word (bg-base, text-primary, border-subtle).
+   Tailwind v4 builds a utility as <property-prefix>-<name-after-the-namespace>,
+   so a variable named `--color-text-primary` would generate `text-text-primary`.
+   To keep the generated utilities identical to the §C.1 token names
+   (`bg-base`, `text-primary`, `border-subtle`), the CSS variables drop the
+   redundant role word: `--color-base`, `--color-primary`, `--color-subtle`.
+   The *values* are byte-identical to §C.1 — only the variable name is shortened.
+   Colors whose §C.1 name has no role word (accent-600, success, …) are kept
+   as-is and already generate clean utilities.
+
+   One consequence: `--color-base` makes `text-base` a COLOR utility
+   (color: var(--color-base)), shadowing Tailwind's built-in `text-base`
+   font-size (1rem). This is harmless here — the §C.1 type scale is
+   `text-display / text-h1 / text-h2 / text-body / text-label / text-caption /
+   text-mono`, and nothing should reach for `text-base` as a size. `text-sm`,
+   `text-lg` etc. are unaffected. The base surface color as text is exactly what
+   the danger button needs (dark text on a light fill).
+   ========================================================================== */
+
+@theme {
+  /* ---- Surface (§C.1 "Surface") --------------------------------------------
+     §C.1 names: bg-base / bg-raised / bg-overlay → utilities bg-base / bg-raised
+     / bg-overlay. */
+  --color-base: #0b0b0f; /* page background */
+  --color-raised: #141419; /* cards, panels */
+  --color-overlay: #1c1c24; /* modals, dropdowns, hover */
+  --color-subtle: #24242e; /* card borders, dividers → border-subtle */
+  --color-strong: #33333f; /* input borders, focused dividers → border-strong */
+
+  /* ---- Text (§C.1 "Text") -------------------------------------------------
+     §C.1 names: text-primary / text-secondary / text-muted. */
+  --color-primary: #f4f4f6;
+  --color-secondary: #a0a0ae; /* labels, helper text */
+
+  /* text-muted (#6B6B7B) fails WCAG AA for normal-size body text
+     (~3.8:1 on bg-base, ~3.5:1 on bg-raised, ~3.2:1 on bg-overlay; AA needs
+     4.5:1). USAGE RULE: use `text-muted` only for non-critical / decorative
+     text — a de-emphasised glyph, a subtle separator label, placeholder-like
+     hints. Anything a user actually needs to READ — timestamps, IDs, counts,
+     values, helper text that carries meaning — uses `text-secondary` (7.6:1),
+     never `text-muted`. This is a spec-owner decision recorded here so C2–C6
+     do not misuse the token. */
+  --color-muted: #6b6b7b; /* decorative / de-emphasised text ONLY — see above */
+
+  /* ---- Accent (§C.1 "Accent (primary)") ---------------------------------
+
+     ⚠ CROSS-THEME NOTE — the -600 / -500 suffixes do NOT encode a consistent
+     light→dark ordering across both themes. Read them as ROLES, not steps on a
+     ramp:
+       --color-accent-600 = the base accent  (primary button fill, active nav,
+                             focus ring, colored borders)
+       --color-accent-500 = the emphasis accent — hover fill AND the accent
+                             text color (accent Badge, active-nav label,
+                             `Alert variant="info"`)
+
+     In DARK mode -500 is LIGHTER than -600 (hover brightens against near-black;
+     #9277FF vs #7C5CFF). In LIGHT mode -500 is DARKER than -600 (#5A3FD6 vs
+     #6D4FEF) — see the light block below for why that inversion is forced, not
+     a mistake. The names are kept because §C.1 names them exactly this and
+     every component already consumes `accent-600` / `accent-500`; renaming
+     would fork the vocabulary from the spec for no functional gain. The role
+     mapping above is the thing to rely on. */
+  --color-accent-600: #7c5cff; /* base accent — buttons, active nav, focus rings */
+  --color-accent-500: #9277ff; /* emphasis — hover fill + accent text (here: lighter) */
+  --color-accent-subtle: rgba(124, 92, 255, 0.12); /* active nav bg, selected row */
+
+  /* Label color for text/icons sitting ON an accent-600 fill (primary button,
+     wordmark glyph). NOT in §C.1's list — added in Stage C3b because the token
+     swap exposed a gap: dark mode's primary button used `text-primary`
+     (#F4F4F6, near-white) on the accent fill and passed AA, but in light mode
+     `text-primary` flips to near-black (#14141B) and drops to 3.5:1 on the same
+     purple — a fail. One fill cannot contrast both a near-white and a near-black
+     label, so the on-accent label needs its own token. The dark value is
+     #F4F4F6 so dark rendering is byte-identical to what shipped. */
+  --color-on-accent: #f4f4f6;
+
+  /* ---- Status (§C.1 "Status") ------------------------------------------------
+     Never the only signal — always paired with a text label (§C.8). */
+  --color-success: #34d399; /* ACTIVE, processed, reconciled */
+  --color-warning: #fbbf24; /* TRIALING, pending, retrying */
+  --color-danger: #f87171; /* PAST_DUE, failed, mismatch */
+  --color-neutral: #8b8b9b; /* CANCELED, terminal */
+
+  /* ---- Typography (§C.1 "Typography") ----------------------------------------
+     Geist + Geist Mono, both bundled via @fontsource (see main.tsx) — no font
+     CDN at runtime. Swapped from Inter / a system-mono stack in the typography
+     addendum: Geist has near-identical x-height and metrics to Inter (a
+     token-level swap, not a redesign), and Geist Mono — a true monospace — pairs
+     with it for the IDs, event IDs, idempotency keys and JSON payloads the §C.1
+     `mono` token covers. Fontsource registers the faces as 'Geist Sans' /
+     'Geist Mono'; the system stack stays as the fallback if a face fails. */
+  --font-sans: 'Geist Sans', system-ui, -apple-system, 'Segoe UI', Roboto,
+    sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+
+  /* Type scale: size / line-height / weight, exactly as §C.1 lists them. */
+  --text-display: 32px;
+  --text-display--line-height: 40px;
+  --text-display--font-weight: 600;
+
+  /* `text-edge` — the composed / editorial register (Tenora redesign,
+     design-reference-analysis §8.3 / §10 Q3). ONE fixed step above the dense
+     in-app `text-display`, for the calm edges of the product: the Overview
+     page's opening statement and the auth heading. Never viewport-locked — a
+     fixed value, with a `text-display sm:text-edge` step-down handled at the
+     call site, not a media query here. `--tracking-edge` is its tighter
+     display tracking. */
+  --text-edge: 44px;
+  --text-edge--line-height: 48px;
+  --text-edge--font-weight: 600;
+
+  /* `text-statement` — one restrained step above `text-edge`, for the single
+     case where the editorial line IS the panel's primary visual message rather
+     than a page opener: the auth art panel's lower headline. Same family /
+     weight / display tracking as `text-edge`; `xl`-only at the call site. */
+  --text-statement: 52px;
+  --text-statement--line-height: 56px;
+  --text-statement--font-weight: 600;
+
+  --tracking-edge: -0.02em;
+
+  --text-h1: 24px;
+  --text-h1--line-height: 32px;
+  --text-h1--font-weight: 600;
+
+  --text-h2: 18px;
+  --text-h2--line-height: 26px;
+  --text-h2--font-weight: 600;
+
+  --text-body: 14px;
+  --text-body--line-height: 22px;
+  --text-body--font-weight: 400;
+
+  --text-label: 13px;
+  --text-label--line-height: 18px;
+  --text-label--font-weight: 500;
+
+  --text-caption: 12px;
+  --text-caption--line-height: 16px;
+  --text-caption--font-weight: 400;
+
+  /* §C.1 specifies "mono 13px 400" with no line-height — left to inherit. */
+  --text-mono: 13px;
+  --text-mono--font-weight: 400;
+
+  /* ---- Spacing (§C.1 "Spacing scale (4px base): 4,8,12,16,24,32,48,64") -----
+     Tailwind v4's default spacing multiplier is 0.25rem = 4px, so steps
+     1/2/3/4/6/8/12/16 already produce 4/8/12/16/24/32/48/64 exactly. The
+     default is kept deliberately (Stage C1 decision) — it reproduces the §C.1
+     scale precisely and, being rem-based, still scales with the user's font
+     size. No override. */
+
+  /* ---- Radius (§C.1 "Radius") ------------------------------------------------
+     sm 6 (inputs, badges) · md 10 (buttons, cards) · lg 16 (panels, modals) */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* ---- Elevation (§C.1 "Shadow") ------------------------------------------ */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-overlay: 0 8px 32px rgba(0, 0, 0, 0.6);
+  /* Accent glow — spec: "0 0 0 1px accent-600, 0 4px 24px rgba(124,92,255,.2)". */
+  --shadow-accent-glow: 0 0 0 1px var(--color-accent-600),
+    0 4px 24px rgba(124, 92, 255, 0.2);
+
+  /* Scrim behind modals and the mobile nav drawer. Stage C3b §4.3: Modal and
+     AppShell used a hardcoded `bg-black/60` — a raw color outside this file.
+     Tokenised here. The dark value matches the old `bg-black/60` render; the
+     light value is a cooler, lighter dim so a modal on a white page isn't
+     framed by a slab of pure black. */
+  --color-scrim: rgba(0, 0, 0, 0.6);
+
+  /* ---- Featured surface (§C.1a Visual Refinement Addendum) ------------------
+     A subtle accent-tinted gradient for the opt-in `<Card featured>` variant —
+     "this card matters," not a marketing banner. Transcribed verbatim from
+     UI spec §C.1a. Consumed via the `bg-featured` utility below (never a raw
+     value in a component). `color-mix()` is broadly supported across current
+     evergreen browsers; this project documents no browserslist target, so per
+     §4.1 we proceed — and because the `bg-featured` utility only sets
+     background-image, a browser that cannot parse the gradient falls back to
+     the `bg-raised` background-color the featured Card still carries. */
+  --gradient-featured: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent-600) 24%, var(--color-raised)),
+    var(--color-raised) 70%
+  );
+}
+
+/* =============================================================================
+   Light theme (Stage C3b) — parallel value set for every token above.
+   --------------------------------------------------------------------------
+   Selector: `:root[data-theme='light']` (the build lowers this to
+   `[data-theme=light]`). Same specificity as the `:root` that `@theme` emits,
+   and this block is emitted after it, so it wins the cascade when the attribute
+   is `light`. Dark needs no block here: it's the default on `:root`, and an
+   explicit `data-theme="dark"` simply doesn't match the light block, so the
+   `:root` values stand.
+
+   Every ratio below is WCAG 2.1, measured against the actual rendered surface
+   (status "badge" rows composite the 12%-alpha tint over the surface first).
+   AA bar: 4.5:1 body text, 3:1 large text / UI component. Recorded verbatim in
+   docs/ui-design-specification.md §C.1.
+
+   Deviations from the spec's candidate values, and why:
+   - border-strong  #CBCBD3 → #8E8E9E. The candidate measures 1.55:1 (bg-base)
+     / 1.61:1 (bg-raised) — an input's border is its only boundary (no fill
+     difference), so §7's 3:1 UI bar applies. bg-base is the limiting surface;
+     the lightest grey that clears 3.00:1 there is ~#909090 (3.01:1). #8E8E9E
+     is 3.09:1 / 3.22:1 — the minimum necessary darkening plus a hair of margin
+     so it doesn't sit exactly on the 3.00 line. It is NOT darker than needed:
+     one step lighter (#8F8F9F ≈ 3.05) would still pass; two (#909090 ≈ 3.01)
+     is the floor. (border-subtle stays a hairline divider, ~1.2:1, same
+     standing as dark's #24242E at 1.28:1 — never the sole indicator of
+     anything, so not held to 3:1.)
+   - accent-500 is DARKER than accent-600 here (#5A3FD6 vs #6D4FEF); dark mode
+     has it lighter (#9277FF vs #7C5CFF). The inversion is forced, not a choice:
+     `accent-500` is used as a TEXT color (accent Badge, active-nav label,
+     `Alert variant="info"`), and on the light accent-subtle tint that text
+     needs 4.5:1 — a lighter-than-600 purple lands at ~3.5:1 and fails, a
+     darker one clears it (#5A3FD6 → 5.85:1). Its other job (hover fill) also
+     wants "darker" on a light surface, so both roles agree on the direction.
+     The -600/-500 names stay (see the cross-theme note in the @theme block);
+     rely on the role mapping, not the number.
+   - success / warning / danger / neutral all darkened (a hue tuned to glow on
+     near-black washes out as text on near-white) so each clears 4.5:1 as Badge
+     text on its own 12%-alpha tint.
+   - text-muted #8B8B98 FAILS AA (3.06–3.36:1), exactly as dark's #6B6B7B does
+     (3.5:1). The C1 rule carries over unchanged: `text-muted` is for decorative
+     / de-emphasised glyphs ONLY. Anything a user must read uses `text-secondary`
+     (7.9:1+). Not "fixed" by darkening — that would just make a worse-looking
+     grey pass a checker; the real rule is the usage rule.
+   - accent-600 #6D4FEF is the spec candidate: 5.23 / 5.01 / 4.76:1 on
+     raised / base / overlay. The overlay margin is thin (4.76 vs 4.5) — flagged
+     for the Stage C3b session-2 visual review; darken to ~#6544DF if it reads
+     washed on screen.
+   ========================================================================== */
+
+:root[data-theme='light'] {
+  /* Surface — text-primary 17.6/18.3/16.7:1 · text-secondary 8.3/8.7/7.9:1
+     on base/raised/overlay (all PASS). */
+  --color-base: #fafafa;
+  --color-raised: #ffffff;
+  --color-overlay: #f4f4f6;
+  --color-subtle: #e4e4ea; /* hairline divider — ~1.2:1, not held to 3:1 (see note) */
+  --color-strong: #8e8e9e; /* input boundary — 3.09:1 base / 3.22:1 raised; ~#909090 is the 3.00 floor (see note) */
+
+  /* Text */
+  --color-primary: #14141b;
+  --color-secondary: #4a4a57;
+  --color-muted: #8b8b98; /* FAILS AA — decorative / de-emphasised ONLY (see note) */
+
+  /* Accent — accent-600 as text 5.01/5.23/4.76:1 (base/raised/overlay, PASS).
+     accent-500 as text on accent-subtle tint 5.85:1, on bg-raised 6.74:1 (PASS). */
+  --color-accent-600: #6d4fef;
+  --color-accent-500: #5a3fd6; /* DARKER than 600 here — inversion is forced, see note + @theme cross-theme note */
+  --color-accent-subtle: rgba(109, 79, 239, 0.1);
+  --color-on-accent: #ffffff; /* on accent-600 fill — 5.23:1 (PASS) */
+
+  /* Scrim — lighter and cooler than dark's near-pure-black slab. */
+  --color-scrim: rgba(15, 15, 24, 0.45);
+
+  /* Status — as Badge text on the matching 12%-alpha tint, over bg-raised / bg-base:
+     success 5.54 / 5.33 · warning 5.88 / 5.67 · danger 5.02 / 4.80 ·
+     neutral 5.02 / 4.84  (all PASS 4.5:1). */
+  --color-success: #046a46;
+  --color-warning: #92400e;
+  --color-danger: #c01c1c;
+  --color-neutral: #63636f;
+
+  /* Elevation — the dark shadows are rgba(0,0,0,.4–.6); on white they read as
+     bruises. Softer, slightly cool near-black at low alpha instead. */
+  --shadow-card: 0 1px 2px rgba(17, 17, 34, 0.09);
+  --shadow-overlay: 0 8px 32px rgba(17, 17, 34, 0.16);
+  --shadow-accent-glow: 0 0 0 1px var(--color-accent-600),
+    0 4px 20px rgba(109, 79, 239, 0.22);
+
+  /* Featured surface (§4.4) — the dark mix is 24% accent into a near-black
+     raised; the same 24% into pure white reads as a loud lavender panel. Pulled
+     back to 14% so it still says "this card matters" without shouting. Tuned
+     against a plain white Card in the session-2 screenshot pass. */
+  --gradient-featured: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--color-accent-600) 14%, var(--color-raised)),
+    var(--color-raised) 72%
+  );
+}
+
+/* =============================================================================
+   Global rules
+   ========================================================================== */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  :root[data-theme='light'] {
+    color-scheme: light;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-base);
+    color: var(--color-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+}
+
+/* Tabular figures for money, counts, IDs and table numerics — non-negotiable
+   for a billing UI (§C.1). Tailwind ships `tabular-nums`; this is an explicit,
+   collision-proof alias components can rely on. */
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Background for the `<Card featured>` variant (§C.1a). Sets background-image
+   only, so the featured Card's `bg-raised` background-color remains as the
+   fallback if `color-mix()` in the gradient cannot be parsed. */
+@utility bg-featured {
+  background-image: var(--gradient-featured);
+}
+
+/* Respect prefers-reduced-motion globally — no non-essential motion (§C.8). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<!-- saved from url=(0088)https://www-sentientx-com.filesusr.com/html/72c20e_6a71568d9440333c0388fcb4daa375ac.html -->
+<html lang="en" style="overscroll-behavior: none; touch-action: none;"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sentient X — Tumbling Disc</title>
+<style>
+  /* one unit = 1px at a 1440px-wide viewport; everything scales with width */
+  :root { --u: calc(100vw / 1440); }
+  /* embed build: never scrolls itself — the parent section's scroll drives it
+     entirely via postMessage({type:'sx-enter'}) */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #1C1C1C; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; z-index: 1; }
+  /* background shape grid — sits behind the rings (higher-specificity z-index) */
+  #stage #shapeGrid { z-index: 0; pointer-events: none; }
+  /* background video — subtle overlay blend (matches orbitHtml / timelineHtml) */
+  .bg-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    opacity: .05; mix-blend-mode: overlay; pointer-events: none; z-index: 0; }
+  /* a second copy, masked to a soft spotlight under the cursor, to lift the
+     video opacity slightly where the pointer is */
+  .bg-video-spot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    mix-blend-mode: screen; pointer-events: none; z-index: 0; opacity: .5;
+    -webkit-mask-image: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0));
+            mask-image: linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0)); }
+
+  /* hover tooltip card */
+  #card {
+    position: absolute; left: 0; top: 0;
+    width: calc(var(--u) * 259.5); box-sizing: border-box;
+    background-color: rgba(255, 255, 255, 0.10);
+    display: flex; flex-direction: column; row-gap: calc(var(--u) * 7.5);
+    align-items: flex-start; justify-content: flex-start;
+    padding: calc(var(--u) * 20); border-radius: calc(var(--u) * 3.75);
+    backdrop-filter: blur(calc(var(--u) * 20)); -webkit-backdrop-filter: blur(calc(var(--u) * 20));
+    color: rgba(255, 255, 255, 1.00);
+    font-family: 'Neue Montreal', sans-serif;
+    pointer-events: none; z-index: 10;
+    opacity: 0; transform: translateY(calc(var(--u) * 12));
+    transition: opacity .28s ease, transform .28s cubic-bezier(.2,.7,.2,1);
+  }
+  #card.show { opacity: 1; transform: translateY(0); }
+  #card .row { display: flex; flex-direction: row; column-gap: calc(var(--u) * 8); width: 100%; align-items: center; }
+  #card .row img { width: calc(var(--u) * 18); height: calc(var(--u) * 18); display: block; }
+  #card .title { font-size: calc(var(--u) * 15); font-weight: 400; line-height: 1.2; }
+  #card .body { font-size: calc(var(--u) * 13.5); font-weight: 400; opacity: .60; line-height: 1.2; }
+
+  /* hero title, sitting above the circles */
+  .hero { position: absolute; left: 50%; top: 20%; transform: translateX(-50%);
+    width: calc(var(--u) * 712); display: flex; flex-direction: column; row-gap: calc(var(--u) * 15);
+    align-items: center; justify-content: center; text-align: center;
+    color: rgba(255,255,255,1); font-family: 'Neue Montreal', sans-serif;
+    pointer-events: none; z-index: 5;
+    opacity: 1; transition: opacity .6s ease, transform .7s cubic-bezier(.2,.7,.2,1);
+    /* keep glyphs solidly filled (no accidental hollow/stroked rendering) */
+    -webkit-text-fill-color: currentColor; -webkit-text-stroke: 0; text-shadow: none;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  .hero > div { -webkit-text-fill-color: currentColor; -webkit-text-stroke: 0; }
+  /* desktop (1440 baseline): the hero body sits in its own container, narrower
+     than the .hero, so the 18px line wraps onto two balanced lines. Scales with
+     viewport width via --u; tablet/mobile reset this to full width below.
+     Nudge the 480 to shift where the two lines break. */
+  .sx-hero-body { width: calc(var(--u) * 480); }
+  /* leaving state 1: lift up + fade out (small parallax) */
+  .hero.hide { opacity: 0; transform: translateX(-50%) translateY(calc(var(--u) * -40)); }
+
+  /* "keep scrolling" hint, pinned to the bottom in the first state */
+  .scroll-hint { position: absolute; left: 50%; bottom: calc(var(--u) * 30); transform: translateX(-50%);
+    display: flex; flex-direction: column; row-gap: calc(var(--u) * 10);
+    align-items: center; justify-content: center; text-align: center;
+    color: rgba(255,255,255,1); font-family: 'Neue Montreal', sans-serif;
+    pointer-events: none; z-index: 5; opacity: 1; transition: opacity .6s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
+  .scroll-hint.hide { opacity: 0; transform: translateX(-50%) translateY(calc(var(--u) * -40)); }
+  .scroll-hint .label { font-weight: 400; line-height: 115%; font-size: calc(var(--u) * 13.5); white-space: nowrap; }
+  .scroll-hint .pill { width: calc(var(--u) * 15); height: calc(var(--u) * 15); box-sizing: border-box;
+    background-color: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center;
+    border-radius: calc(var(--u) * 3); backdrop-filter: blur(calc(var(--u) * 20)); -webkit-backdrop-filter: blur(calc(var(--u) * 20));
+    pointer-events: auto; cursor: pointer; transition: background-color .25s ease; }
+  .scroll-hint .pill:hover { background-color: #DBFAC4; }
+  .scroll-hint .pill:hover .chevron { background-color: #1C1C1C; }
+
+  /* second-state content stack, left side, vertically centred */
+  .intro { position: absolute; left: calc(var(--u) * 30); top: 50%;
+    /* hidden state sits a touch lower; it rises into place on show (parallax) */
+    transform: translateY(calc(-50% + var(--u) * 40));
+    width: calc(var(--u) * 460); display: flex; flex-direction: column; row-gap: calc(var(--u) * 40);
+    align-items: flex-start; justify-content: center; text-align: left;
+    color: rgba(255,255,255,1); font-family: 'Neue Montreal', sans-serif;
+    pointer-events: none; z-index: 5; opacity: 0; transition: opacity .6s ease, transform .7s cubic-bezier(.2,.7,.2,1);
+    -webkit-text-fill-color: currentColor; -webkit-text-stroke: 0; text-shadow: none;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  .intro.show { opacity: 1; transform: translateY(-50%); }
+  /* second-state stack: title (30) over body (18), 20 gap */
+  .intro .stack { display: flex; flex-direction: column; row-gap: calc(var(--u) * 20);
+    width: 100%; align-items: flex-start; }
+  .intro .stack .title { font-weight: 400; line-height: 110%; font-size: calc(var(--u) * 30);
+    letter-spacing: -0.02em;
+    color: rgba(255,255,255,1); -webkit-text-fill-color: rgba(255,255,255,1); }
+  .intro .stack .body { font-weight: 400; line-height: 120%; font-size: calc(var(--u) * 18);
+    width: 100%; color: #A3A3A3; -webkit-text-fill-color: #A3A3A3; }
+  .intro .more { display: flex; flex-direction: row; column-gap: calc(var(--u) * 10); align-items: center; }
+  .intro .more-label { font-weight: 400; line-height: 115%; font-size: calc(var(--u) * 13.5); white-space: nowrap; }
+  .intro .pill { width: calc(var(--u) * 15); height: calc(var(--u) * 15); box-sizing: border-box;
+    background-color: rgba(255,255,255,0.15); display: flex; align-items: center; justify-content: center;
+    border-radius: calc(var(--u) * 3); backdrop-filter: blur(calc(var(--u) * 20)); -webkit-backdrop-filter: blur(calc(var(--u) * 20)); }
+  .intro .chevron { width: calc(var(--u) * 8); height: calc(var(--u) * 8); background-color: #fff; /* SVG already points right */
+    -webkit-mask: url('https://static.wixstatic.com/shapes/72c20e_427b9ca7632744f18871d2a40d97adab.svg') center / contain no-repeat;
+            mask: url('https://static.wixstatic.com/shapes/72c20e_427b9ca7632744f18871d2a40d97adab.svg') center / contain no-repeat; }
+  /* chevron via CSS mask so it renders solid white regardless of the SVG's own fill */
+  .scroll-hint .chevron { width: calc(var(--u) * 8); height: calc(var(--u) * 8); background-color: #fff;
+    transition: background-color .25s ease;
+    transform: rotate(90deg); /* SVG points right -> rotate clockwise to point down */
+    -webkit-mask: url('https://static.wixstatic.com/shapes/72c20e_427b9ca7632744f18871d2a40d97adab.svg') center / contain no-repeat;
+            mask: url('https://static.wixstatic.com/shapes/72c20e_427b9ca7632744f18871d2a40d97adab.svg') center / contain no-repeat; }
+
+  /* ============================================================
+     BACKGROUND-VIDEO CLOUD REVEAL  (performance-safe)
+     The background video masks in from the bottom-centre in a cloud-like
+     form. The mask is a STATIC feTurbulence bake (a bottom-weighted radial
+     alpha, displaced into wisps) rendered ONCE; we animate only its
+     mask-size + opacity -> no per-frame filter. Rings / hero / dark bg stay
+     visible from the start, so the intro handoff stays seamless.
+     ============================================================ */
+  #bgClouds { position: absolute; inset: 0; z-index: 0; opacity: 0;
+    -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='1200'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='100%25' r='100%25'%3E%3Cstop offset='0%25' stop-color='%23fff' stop-opacity='1'/%3E%3Cstop offset='48%25' stop-color='%23fff' stop-opacity='1'/%3E%3Cstop offset='100%25' stop-color='%23fff' stop-opacity='0'/%3E%3C/radialGradient%3E%3Cfilter id='f' x='-25%25' y='-25%25' width='150%25' height='150%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.011' numOctaves='4' seed='8' stitchTiles='stitch' result='n'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='n' scale='170' xChannelSelector='R' yChannelSelector='G'/%3E%3C/filter%3E%3C/defs%3E%3Crect width='100%25' height='100%25' fill='url(%23g)' filter='url(%23f)'/%3E%3C/svg%3E");
+            mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='1200'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='100%25' r='100%25'%3E%3Cstop offset='0%25' stop-color='%23fff' stop-opacity='1'/%3E%3Cstop offset='48%25' stop-color='%23fff' stop-opacity='1'/%3E%3Cstop offset='100%25' stop-color='%23fff' stop-opacity='0'/%3E%3C/radialGradient%3E%3Cfilter id='f' x='-25%25' y='-25%25' width='150%25' height='150%25'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.011' numOctaves='4' seed='8' stitchTiles='stitch' result='n'/%3E%3CfeDisplacementMap in='SourceGraphic' in2='n' scale='170' xChannelSelector='R' yChannelSelector='G'/%3E%3C/filter%3E%3C/defs%3E%3Crect width='100%25' height='100%25' fill='url(%23g)' filter='url(%23f)'/%3E%3C/svg%3E");
+    -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+    -webkit-mask-position: 50% 100%; mask-position: 50% 100%;
+    -webkit-mask-size: 28%; mask-size: 28%;
+    will-change: mask-size, opacity; }
+  /* settled: drop the mask entirely so the video sits at its normal state
+     (and the cursor spotlight mask on .bg-video-spot works unimpeded) */
+  #bgClouds.sx-shown { -webkit-mask-image: none; mask-image: none; opacity: 1; }
+
+  /* ============================================================
+     TABLET BREAKPOINT (1000–750px).
+     Sizes below are specified at a 768px baseline. The --u unit is
+     calc(100vw/1440), so a target px maps to a multiplier of
+     target × 1440/768 = target × 1.875 — that renders the exact target
+     at 768px and scales with viewport width across the whole range.
+     Chevron pills are scaled by the same factor as their label (×1.25)
+     so they stay proportionate to the new text. Hero eyebrow/heading/
+     body carry !important to override their inline font-size.
+     ============================================================ */
+  @media (min-width: 750px) and (max-width: 1000px) {
+    /* --- hero stack ("The Autonomous Enterprise") --- */
+    .hero > div:first-child { font-size: calc(var(--u) * 16.875) !important; } /* eyebrow  9px */
+    .hero .sx-wipe          { font-size: calc(var(--u) * 75) !important; white-space: nowrap; } /* heading 40px, one line */
+    .hero .sx-lines         { font-size: calc(var(--u) * 24.375) !important; }  /* body    13px */
+    .sx-hero-body           { width: 100%; }  /* undo the desktop narrowing — tablet body stays full-width */
+    /* "Keep Scrolling" + its chevron pill (proportionate to the 9px label) */
+    .scroll-hint          { row-gap: calc(var(--u) * 12.5); }
+    .scroll-hint .label   { font-size: calc(var(--u) * 16.875); }              /* 9px */
+    .scroll-hint .pill    { width: calc(var(--u) * 18.75); height: calc(var(--u) * 18.75);
+                            border-radius: calc(var(--u) * 3.75); }
+    .scroll-hint .chevron { width: calc(var(--u) * 10); height: calc(var(--u) * 10); }
+    /* --- second-state panel ("One intelligence, three layers") --- */
+    /* widen the panel by the body's growth factor (18 -> 20.625u) so the text
+       stacks with its original line density instead of orphaning words */
+    /* dock the second-state panel to the top-CENTRE (same top as .hero: 20%),
+       horizontally centred; keep the rise-in entrance (40u lower -> 0) */
+    .intro                { width: calc(var(--u) * 675); top: 20%;             /* 360px @768 (body width) */
+                            left: 50%;                                         /* centre horizontally */
+                            align-items: center; text-align: center;           /* centre the content */
+                            transform: translate(-50%, calc(var(--u) * 40)); } /* hidden: sits 40u lower */
+    .intro.show           { transform: translateX(-50%); }                     /* shown: at the docked spot */
+    .intro .stack         { align-items: center; }                            /* centre title + body */
+    .intro .stack .title  { font-size: calc(var(--u) * 45); white-space: nowrap; } /* heading 24px, one line */
+    .intro .stack .body   { font-size: calc(var(--u) * 24.375); }              /* body    13px */
+    .intro .more-label    { font-size: calc(var(--u) * 24.375); }              /* 13px */
+    .intro .more          { column-gap: calc(var(--u) * 12.5); }
+    .intro .pill          { width: calc(var(--u) * 18.75); height: calc(var(--u) * 18.75);
+                            border-radius: calc(var(--u) * 3.75); }
+    .intro .chevron       { width: calc(var(--u) * 10); height: calc(var(--u) * 10);
+                            transform: rotate(90deg); }                        /* SVG points right -> down */
+    /* hover tooltip cards ("AI Core" etc.) 2x bigger — redefining --u locally
+       scales EVERYTHING inside (width, padding, icon, text, blur) by 2 */
+    #card                 { --u: calc(100vw / 1440 * 2); }
+  }
+
+  /* ============================================================
+     MOBILE BREAKPOINT (0–750px).
+     Sizes below are specified at a 390px baseline. The --u unit is
+     calc(100vw/1440), so a target px maps to a multiplier of
+     target × 1440/390 = target × 3.6923 — that renders the exact target
+     at 390px and scales with viewport width across the whole range.
+     Chevron pills keep the tablet's real-px proportions for a 9px label
+     (pill 10px, chevron 5.33px). Hero eyebrow/heading/body carry
+     !important to override their inline font-size. The 32px heading is
+     allowed to WRAP (it can't fit one line at 390px). Disc logic mirrors
+     the tablet: the orb holds its parked pose through the scroll (see the
+     MOBILE const in the script); only the text stack transitions.
+     Upper bound is 749.98px so it never overlaps the tablet block (≥750).
+     ============================================================ */
+  @media (max-width: 749.98px) {
+    /* --- hero stack ("The Autonomous Enterprise") --- */
+    .hero                     { width: calc(88vw - 20px); row-gap: calc(var(--u) * 30); } /* 20px narrower to re-stack the heading */
+    .hero > div:first-child   { font-size: calc(var(--u) * 33.23) !important; }     /* eyebrow  9px */
+    .hero .sx-wipe            { font-size: calc(var(--u) * 118.15) !important; }     /* heading 32px, wraps */
+    .hero .sx-lines           { font-size: calc(var(--u) * 48) !important; }         /* body    13px */
+    .sx-hero-body             { width: 100%; }  /* undo the desktop narrowing — mobile body stays full-width */
+    /* "Keep Scrolling" + its chevron pill (proportionate to the 9px label) */
+    .scroll-hint          { row-gap: calc(var(--u) * 24.62); bottom: calc(var(--u) * 73.85 + 60px); } /* raised 60px net */
+    .scroll-hint .label   { font-size: calc(var(--u) * 33.23); }                    /* 9px */
+    .scroll-hint .pill    { width: calc(var(--u) * 36.92); height: calc(var(--u) * 36.92);
+                            border-radius: calc(var(--u) * 7.38); }                 /* 10px pill */
+    .scroll-hint .chevron { width: calc(var(--u) * 19.69); height: calc(var(--u) * 19.69); } /* 5.33px */
+    /* --- second-state panel ("One intelligence, three layers") --- */
+    /* dock the panel to the top-CENTRE (same top as .hero: 20%), horizontally
+       centred; keep the rise-in entrance (40u lower -> 0), mirroring the tablet */
+    .intro                { width: 88vw; top: 20%;
+                            left: 50%;                                              /* centre horizontally */
+                            align-items: center; text-align: center;                /* centre the content */
+                            transform: translate(-50%, calc(var(--u) * 40)); }      /* hidden: sits 40u lower */
+    .intro.show           { transform: translateX(-50%); }                          /* shown: at the docked spot */
+    .intro .stack         { align-items: center; row-gap: calc(var(--u) * 30); }    /* centre title + body */
+    .intro .stack .title  { font-size: calc(var(--u) * 59.08); }                    /* heading 16px, wraps */
+    .intro .stack .body   { font-size: calc(var(--u) * 48); }                       /* body    13px */
+    .intro .more-label    { font-size: calc(var(--u) * 33.23); }                    /* 9px */
+    .intro .more          { column-gap: calc(var(--u) * 24.62); }
+    .intro .pill          { width: calc(var(--u) * 36.92); height: calc(var(--u) * 36.92);
+                            border-radius: calc(var(--u) * 7.38); }                 /* 10px pill */
+    .intro .chevron       { width: calc(var(--u) * 19.69); height: calc(var(--u) * 19.69);
+                            transform: rotate(90deg); }                             /* SVG points right -> down */
+    /* hover tooltip cards 3x bigger — redefining --u locally scales EVERYTHING
+       inside (width, padding, icon, text, blur) by 3 (mostly moot on touch) */
+    #card                 { --u: calc(100vw / 1440 * 3); }
+  }
+</style>
+</head>
+<body style="overscroll-behavior: none; touch-action: none;">
+  <div id="stage">
+    <!-- background: code-rendered ascii grid of the 3 brand shapes (see script
+         near the end). Replaces the old video background (previous asset
+         72c20e_1ba4bc85359a44c6a3c2036f46107f00). -->
+    <canvas id="shapeGrid" width="2538" height="1347"></canvas>
+    <div id="card" class="" style="left: 955.15px; top: 232.15px;">
+      <div class="row"><img id="cardIcon" alt="" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAACM0lEQVR4AZRRQWhTQRB9uzEBoan/Kh6MhxRyMjlUKbaSgDnaetBbQNtjwdzVuzcvKXg0CfRkDmKvCqnaUrCHxJPYBBJB0eO3KQjp/xlntn9/0k8pZthhd9/svHkzq3GGdY4/5bvD3erBcKfXGe5Q4C3Bvnkf752RglNEvb97KU5qglSTQI8UkMLYsoLpkX7T5QI92puMjYkOhrtZL+a1OC/Pfu4iLuAd+y3JsQ+NIlGiMGoCysH/m6NATavMEPkxf1oSW85hZVW56C4PT6TKJeq1jdf48f2X8Tqfo/HgnpfP0RjFVgIg3A7dAUrFx6hXGlCMitc2Glh/8ASH7hGipkg/1PwT2cmAKFi+sYaf/d/YfF/BlauXjW++q+Drly6W51eNwskcgPIyo5BISFbm1zDgqpbEJgjhy8ZzDP6w2jtlJu3YEAhICVEICAGzI3lpRoIhbg9JZwZJJ8lkR5jls8Vl59bQR2CZ62ls7VehFFDiqqIwCJl2SsUyFJff2n9l2rUxhtqaS3+wgOzSgsxDyNbvPzXDPRl+GbOsNNqy5GiotlaaaoiYkL39XMXN2zmOELtC8e4SpIDEGDi1SI3qOh1f2mZUnLfxkhk8e8EqeCaT5/GLkxOX6QuHlqvnx1Z5d9mnXOT68VhBkgxR5uJCn6AEmIKMXIIuZNSC+SxDJIxziVttVpYjwARwvm178Qs5ybHPQiIBRNlcYvEa/3GBCHXG2uxmSQEFVZNYOrEYKjFBAP8AAAD//88+focAAAAGSURBVAMA/yvxV6TX0DUAAAAASUVORK5CYII="><span class="title" id="cardTitle">Human Identity</span></div>
+      <div class="body" id="cardBody">Protects human identity while extending humanity into the universe.</div>
+    </div>
+    <div class="hero hide">
+      <div style="font-family:&#39;Neue Montreal&#39;,sans-serif; font-weight:400; text-align:center; line-height:100%; font-size:calc(var(--u)*12);">SENTIENT X / <span style="color:#A3A3A3; -webkit-text-fill-color:#A3A3A3;">Reimagine the Impossible</span></div>
+      <div class="sx-wipe" style="color:rgba(255,255,255,1); font-family:&#39;Neue Montreal&#39;,sans-serif; font-weight:400; text-align:center; line-height:105%; letter-spacing:-0.03em; font-size:calc(var(--u)*60);"><span class="sx-wipe-txt" style="visibility: visible;">The Autonomous Enterprise</span><canvas class="sx-wipe-cv" width="1233" height="126"></canvas></div>
+      <div class="sx-hero-body"><div class="sx-lines sx-play" style="color:#A3A3A3; -webkit-text-fill-color:#A3A3A3; font-family:&#39;Neue Montreal&#39;,sans-serif; font-weight:400; text-align:center; line-height:110%; font-size:calc(var(--u)*18);"><span class="sx-line"><span style="transition-delay: 0s;">AI-first by design. Faster sharper decisions, real execution,</span></span><span class="sx-line"><span style="transition-delay: 0.2s;">built for what comes next.</span></span></div></div>
+    </div>
+    <div class="scroll-hint hide">
+      <div class="label">Keep Scrolling</div>
+      <div class="pill"><span class="chevron down"></span></div>
+    </div>
+    <div class="intro show">
+      <div class="stack">
+        <div class="title sx-wipe"><span class="sx-wipe-txt" style="visibility: visible;">One intelligence, three layers</span><canvas class="sx-wipe-cv" width="654" height="66"></canvas></div>
+        <div class="body sx-lines sx-play"><span class="sx-line"><span style="transition-delay: 0s;">An AI core that orchestrates execution, reinvents the</span></span><span class="sx-line"><span style="transition-delay: 0.2s;">enterprise around it, and protects human identity as it</span></span><span class="sx-line"><span style="transition-delay: 0.4s;">carries us beyond Earth.</span></span></div>
+      </div>
+      <div class="more">
+        <span class="more-label">Click Each Layer to Find Out More</span>
+        <span class="pill"><span class="chevron"></span></span>
+      </div>
+    </div>
+  <canvas width="2538" height="1347"></canvas></div>
+
+
+  <script>
+  /* ============================================================
+     CONFIG — tweak the look here
+     ============================================================ */
+  const CONFIG = {
+    bg:           0x1C1C1C,   // background colour
+    fill:         0x1C1C1C,   // disc face colour (same as bg = invisible face,
+                              // used only to hide the back edges -> clean line look)
+    edgeColor:    0xFFFFFF,   // stroke colour of the sharp edges
+    edgeOpacity:  0.40,       // 40% opacity stroke
+    outerRadius:  1.0,        // outer edge of the outermost ring
+    ringWidth:    0.12,       // band width of every ring (edge -> inner edge)
+    ringGap:      0.14,       // equal gap between consecutive rings
+    ringCount:    3,          // number of concentric rings
+    thickness:    0.16,       // extrusion depth (small = thin ring)
+    segments:     128,        // smoothness of the circles
+    edgeThreshold: 30,        // only edges SHARPER than this show (hides facets)
+    tiltX:        0.55,       // initial tilt so both face + edge read
+    tiltZ:        0.10,
+    speedX:       0.22,       // tumble speeds (radians / sec) on two axes
+    speedY:       0.35,
+    fitMargin:    1.35,       // world half-extent (shape param — unchanged)
+    baselineH:    810,        // px. Reference section/iframe HEIGHT at the 1440px design
+                              //     breakpoint. Discs are sized to match their old
+                              //     height-based look at (1440 x baselineH), then scale
+                              //     with viewport WIDTH from there. Tweak if the baseline
+                              //     size is off (taller section -> bigger discs).
+
+    // --- hover interaction ---
+    hoverSlow:    0.10,       // hovered ring runs at 10% speed (near slow-mo)
+    hoverEase:    3.5,        // how fast speed + colour ease in/out
+    gradFrom:     0x79877D,   // hover gradient start colour (fallback)
+    gradTo:       0xE1DDBB,   // hover gradient end colour (fallback)
+    // Per-ring hover gradients (index 0 = outer ring). Each entry is a list
+    // of colour stops spread evenly across the ring. Rings without an entry
+    // fall back to gradFrom -> gradTo.
+    ringGrads: [
+      [0xF6E2C3, 0xFFFBF7],           // outer ring
+      [0xA58989, 0xCEBFB3, 0xF2EEEB], // middle ring
+    ],
+
+    // --- scroll "enter" threshold animation ---
+    enterScale:   1.8,        // parked size multiplier (bigger at the bottom)
+    enterDrop:    1.30,       // parked centre this × half-viewport below the middle
+    enterShift:   0.37,       // shift rings this × half-width to the right once entered
+    enterSlow:    0.30,       // spin speed before entering (× normal)
+    enterDur:     1.25        // seconds for the big <-> small transition (quart eased)
+  };
+
+  /* ============================================================
+     TABLET enter-scale override (1000–750px).
+     The PARKED (first-part) disc is 2x its desktop size; the ENTERED
+     (second-part, post-scroll) disc is unchanged. Only enterScale changes
+     — enter=1 still lerps to 1.0 — so the shrink range simply grows.
+     ============================================================ */
+  const BASE_ENTER_SCALE = CONFIG.enterScale;                 // captured before any mutation
+  const BASE_ENTER_DROP  = CONFIG.enterDrop;
+  // Tablet (1000–750px) parked overrides: 2.6x scale, and a shallower drop so the
+  // PARKED (pre-scroll) orb sits ~25% of the viewport height higher (enterDrop
+  // 1.30 -> 0.80). The ENTERED (post-scroll) pose is unchanged (still lerps to 0).
+  // stayParked: on tablet the orb holds its parked pose through the scroll — it does
+  // NOT shrink, move up, or shift right; only the text stack transitions.
+  const TABLET = { minW: 750, maxW: 1000, enterScale: 2.6, enterDrop: 0.80, stayParked: true };
+  const inTablet = (width) => width >= TABLET.minW && width <= TABLET.maxW;
+  // Mobile (0–750px): same disc logic as the tablet — the orb holds its parked
+  // pose through the scroll (stayParked) at the parked scale/drop; only the text
+  // stack transitions. Kept as its own const so it can be tuned independently.
+  const MOBILE = { maxW: 750, enterScale: 3.25, enterDrop: 0.80, stayParked: true };
+  const inMobile = (width) => width < MOBILE.maxW;
+  function enterScaleFor(width) { return inMobile(width) ? MOBILE.enterScale : inTablet(width) ? TABLET.enterScale : BASE_ENTER_SCALE; }
+  function enterDropFor(width)  { return inMobile(width) ? MOBILE.enterDrop  : inTablet(width) ? TABLET.enterDrop  : BASE_ENTER_DROP; }
+  function stayParkedFor(width) { return inMobile(width) ? MOBILE.stayParked : inTablet(width) ? TABLET.stayParked : false; }
+
+  /* ============================================================
+     SCENE — shared by the worker and the main-thread fallback.
+     Only references THREE (passed in) + globals present in both
+     contexts (Math, performance), so the exact same source runs
+     in a Web Worker OR on the main thread.
+     ============================================================ */
+  function makeScene(canvas, THREE, cfg, size) {
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setClearColor(cfg.bg, 0); // transparent -> background video shows through
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+
+    const rings = [];        // each ring spins on its own
+    const pickTargets = [];  // ring face meshes, for hover raycasting
+    const root = new THREE.Group(); // holds all rings; shifted vertically on enter
+    scene.add(root);
+
+    // Shared stroke material: plain white-ish line at 30% opacity (constant).
+    const lineMat = new THREE.LineBasicMaterial({
+      color: cfg.edgeColor, transparent: true, opacity: cfg.edgeOpacity
+    });
+    // Shared face material: vertexColors so each ring can carry its own fill.
+    // At rest the fill is painted the background colour (invisible, and it still
+    // occludes the far edges -> hidden-line look). On hover it eases to the
+    // gradient, so only the hovered ring's face lights up.
+    const faceMat = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1
+    });
+
+    // Resting fill colour + per-ring gradient stops.
+    const cBg = new THREE.Color(cfg.fill);
+    // Default gradient (used by rings without a ringGrads entry).
+    const defaultStops = [new THREE.Color(cfg.gradFrom), new THREE.Color(cfg.gradTo)];
+    // Pre-build the THREE.Color stop lists for each ring.
+    const ringStops = [];
+    for (let i = 0; i < cfg.ringCount; i++) {
+      const raw = (cfg.ringGrads && cfg.ringGrads[i]) || null;
+      ringStops.push(raw ? raw.map((h) => new THREE.Color(h)) : defaultStops);
+    }
+    // Sample a multi-stop gradient at t in [0,1] into `out`.
+    function sampleStops(stops, t, out) {
+      if (stops.length === 1) return out.copy(stops[0]);
+      const f = Math.max(0, Math.min(1, t)) * (stops.length - 1);
+      const i0 = Math.min(stops.length - 2, Math.floor(f));
+      const local = f - i0;
+      const a = stops[i0], b = stops[i0 + 1];
+      out.r = a.r + (b.r - a.r) * local;
+      out.g = a.g + (b.g - a.g) * local;
+      out.b = a.b + (b.b - a.b) * local;
+      return out;
+    }
+
+    // Build N concentric rings; the innermost is a solid filled disc.
+    const step = cfg.ringWidth + cfg.ringGap;
+    for (let i = 0; i < cfg.ringCount; i++) {
+      const outer = cfg.outerRadius - i * step;
+      const inner = outer - cfg.ringWidth;
+      if (inner <= 0) break;
+
+      // Every ring is a flat extruded annulus, EXCEPT the innermost which is a
+      // solid filled disc (no centre hole).
+      const shape = new THREE.Shape();
+      shape.absarc(0, 0, outer, 0, Math.PI * 2, false);
+      if (i !== cfg.ringCount - 1) {
+        const hole = new THREE.Path();
+        hole.absarc(0, 0, inner, 0, Math.PI * 2, true);
+        shape.holes.push(hole);
+      }
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: cfg.thickness, bevelEnabled: false, curveSegments: cfg.segments
+      });
+      geo.center(); // extrude runs 0..depth; recentre on the origin
+      const edgeGeo = new THREE.EdgesGeometry(geo, cfg.edgeThreshold);
+
+      // Bake a per-vertex fill gradient (runs along local X). Live starts at bg.
+      const pos = geo.attributes.position;
+      const n = pos.count;
+      const colors = new Float32Array(n * 3);
+      const grad   = new Float32Array(n * 3);
+      const stops  = ringStops[i];
+      const gc     = new THREE.Color();
+      for (let v = 0; v < n; v++) {
+        colors[v*3] = cBg.r; colors[v*3+1] = cBg.g; colors[v*3+2] = cBg.b;
+        const t = (pos.getX(v) + outer) / (2 * outer);
+        sampleStops(stops, t, gc);
+        grad[v*3] = gc.r; grad[v*3+1] = gc.g; grad[v*3+2] = gc.b;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+      const mesh = new THREE.Mesh(geo, faceMat);
+      pickTargets.push(mesh);
+
+      const line = new THREE.LineSegments(edgeGeo, lineMat);
+
+      // Each ring lives in its own group so it can spin independently.
+      const rg = new THREE.Group();
+      rg.add(mesh);
+      rg.add(line);
+      rg.rotation.x = cfg.tiltX + i * 0.15; // slight offset so they start apart
+      rg.rotation.z = cfg.tiltZ;
+      root.add(rg);
+
+      // Per-ring speeds: each progressively faster, alternating twist direction.
+      const dir = i % 2 === 0 ? 1 : -1;
+      rings.push({
+        index: i, group: rg, mesh: mesh,
+        faceAttr: geo.attributes.color, colors, grad,
+        baseX: cfg.tiltX + i * 0.15, baseY: 0, // rest tilt, used by clock-locked parked spin
+        sx: cfg.speedX * (1 + i * 0.55),
+        sy: cfg.speedY * dir * (1 + i * 0.40),
+        speedF: 1,   // 1 = full speed, eases toward hoverSlow on hover
+        colorF: 0    // 0 = fill hidden, eases toward 1 (gradient) on hover
+      });
+    }
+    pickTargets.forEach((m, i) => { m.userData.ring = i; });
+
+    // --- hover state + raycaster ---
+    const raycaster = new THREE.Raycaster();
+    const mouse = { x: 0, y: 0, active: false };
+    let hovered = -1, lastHovered = -1, onHoverCb = null;
+    function setMouse(x, y, active) { mouse.x = x; mouse.y = y; mouse.active = active; }
+    function setHoverCallback(fn) { onHoverCb = fn; }
+
+    // --- scroll "enter" state: 0 = parked below + slow + no hover, 1 = in place ---
+    let enter = 0, enterTarget = 0, hasEntered = false;
+    function setEnterTarget(v) { enterTarget = v > 0.5 ? 1 : 0; }
+    // responsive PARKED size — main thread sets this from the width breakpoint;
+    // update() reads cfg.enterScale each frame (entered target stays 1.0).
+    function setEnterScale(v) { cfg.enterScale = v; }
+    function setEnterDrop(v) { cfg.enterDrop = v; }   // responsive parked drop (tablet override)
+    function setEnterStayParked(v) { cfg.enterStayParked = v; }   // tablet: hold parked pose on enter
+
+    function setSize(w, h, dpr) {
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(w, h, false);
+      const aspect = w / h;
+      // fit-WIDTH, calibrated to the 1440 baseline: the world's horizontal half-extent
+      // is fixed, so the discs' pixel size tracks viewport WIDTH. marginW is scaled by
+      // 1440/baselineH so that at (1440 x baselineH) the discs match their old
+      // height-based size exactly. Vertical extent follows from the aspect (square
+      // world units). enterDrop/enterShift placement stays a fixed screen fraction
+      // because it's expressed relative to camera.top / camera.right.
+      const marginW = cfg.fitMargin * (1440 / cfg.baselineH);
+      const v = cfg.outerRadius * marginW;
+      camera.left = -v; camera.right = v;
+      camera.top = v / aspect; camera.bottom = -v / aspect;
+      camera.updateProjectionMatrix();
+    }
+
+    const lerp = (a, b, t) => a + (b - a) * t;
+
+    function update(dt) {
+      // 0) advance enter linearly toward its target over a fixed duration, then
+      //    apply easeInOutQuart, and derive the slide/scale, spin ramp + hover gate.
+      const stepd = dt / cfg.enterDur;
+      if (enter < enterTarget) enter = Math.min(enterTarget, enter + stepd);
+      else if (enter > enterTarget) enter = Math.max(enterTarget, enter - stepd);
+      const eased = enter < 0.5                            // easeInOutQuart
+        ? 8 * enter * enter * enter * enter
+        : 1 - Math.pow(-2 * enter + 2, 4) / 2;
+      const startY = -camera.top * cfg.enterDrop;          // parked: centre sits low
+      // entered targets — when enterStayParked (tablet) they EQUAL the parked values,
+      // so the orb holds its first-state pose (no shrink / move / shift) while only
+      // the text stack transitions. Desktop/mobile keep the normal shrink+slide.
+      const endY     = cfg.enterStayParked ? startY : 0;
+      const endShift = cfg.enterStayParked ? 0 : cfg.enterShift;
+      const endScale = cfg.enterStayParked ? cfg.enterScale : 1;
+      root.position.y = lerp(startY, endY, eased);
+      root.position.x = lerp(0, camera.right * endShift, eased); // slide right on enter
+      const sc = lerp(cfg.enterScale, endScale, eased);    // bigger while parked
+      root.scale.set(sc, sc, sc);
+      // enter cue: spin the whole assembly one full revolution as you advance to the
+      // second state. Only when the orb otherwise stays parked (tablet), so people
+      // can tell they've moved on; eased 0->1 => 0->2π (lands back at identity).
+      root.rotation.y = eased * (cfg.enterStayParked ? 1 : 0) * Math.PI * 2;
+      // hold the parked spin rate too when staying parked, so nothing about the orb changes
+      const enterSpeed = cfg.enterStayParked ? cfg.enterSlow : (cfg.enterSlow + (1 - cfg.enterSlow) * eased);
+      const entered = enter > 0.99;                        // hover only once in place
+
+      // 1) spin each ring. While PARKED, lock the spin to the shared wall clock
+      //    (Date.now) so the "Enter Site" overlay can match this exact pose for a
+      //    seamless handoff. Once entering/entered, integrate normally (continuous
+      //    from the clock-locked value).
+      if (!hasEntered && enter <= 0.0001) {
+        // clock-locked parked spin — only BEFORE the first enter, so the
+        // "Enter Site" overlay can hand off seamlessly on initial load
+        const t = Date.now() / 1000;
+        for (const r of rings) {
+          r.group.rotation.x = r.baseX + r.sx * cfg.enterSlow * t;
+          r.group.rotation.y = r.baseY + r.sy * cfg.enterSlow * t;
+        }
+      } else {
+        // once we've moved, integrate forever (continuous — no snap when scrolling back)
+        hasEntered = true;
+        for (const r of rings) {
+          r.group.rotation.x += r.sx * enterSpeed * r.speedF * dt;
+          r.group.rotation.y += r.sy * enterSpeed * r.speedF * dt;
+        }
+      }
+
+      // 2) figure out which ring is under the cursor (frontmost hit) — only when
+      //    fully entered, so there are no hover effects while parked / sliding in
+      hovered = -1;
+      if (entered && mouse.active) {
+        scene.updateMatrixWorld(true);
+        raycaster.setFromCamera(mouse, camera);
+        const hit = raycaster.intersectObjects(pickTargets, false)[0];
+        if (hit) hovered = hit.object.userData.ring;
+      }
+      // notify the page when the hovered ring changes (for the tooltip card)
+      if (hovered !== lastHovered) {
+        lastHovered = hovered;
+        if (onHoverCb) onHoverCb(hovered);
+      }
+
+      // 3) ease speed + colour toward their hover targets
+      const k = Math.min(1, dt * cfg.hoverEase);
+      for (const r of rings) {
+        const on = r.index === hovered;
+        r.speedF = lerp(r.speedF, on ? cfg.hoverSlow : 1, k);
+        const cf = lerp(r.colorF, on ? 1 : 0, k);
+        if (Math.abs(cf - r.colorF) > 0.001) {
+          r.colorF = cf;
+          // ease the fill from the background colour toward the gradient
+          const c = r.colors, g = r.grad;
+          for (let j = 0; j < c.length; j += 3) {
+            c[j]   = lerp(cBg.r, g[j],   cf);
+            c[j+1] = lerp(cBg.g, g[j+1], cf);
+            c[j+2] = lerp(cBg.b, g[j+2], cf);
+          }
+          r.faceAttr.needsUpdate = true;
+        }
+      }
+    }
+
+    function render() { renderer.render(scene, camera); }
+
+    setSize(size.w, size.h, size.dpr);
+    return { setSize, update, render, setMouse, setHoverCallback, setEnterTarget, setEnterScale, setEnterDrop, setEnterStayParked };
+  }
+
+  /* ============================================================
+     WORKER SOURCE — built from makeScene + a setTimeout loop.
+     Workers have no requestAnimationFrame, and that's the point:
+     the setTimeout loop is NOT subject to the iframe rAF throttle
+     Safari applies to embedded (e.g. Wix) canvases.
+     ============================================================ */
+  const WORKER_SRC = `
+    importScripts('https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js');
+    const makeScene = ${makeScene.toString()};
+    let app = null, last = 0;
+    function loop() {
+      const now = performance.now();
+      const dt = Math.min((now - last) / 1000, 0.1); last = now;
+      if (app) { app.update(dt); app.render(); }
+      setTimeout(loop, 1000 / 60);
+    }
+    self.onmessage = (e) => {
+      const d = e.data;
+      if (d.type === 'init') {
+        app = makeScene(d.canvas, THREE, d.cfg, d.size);
+        if (d.enterScale != null) app.setEnterScale(d.enterScale);
+        if (d.enterDrop != null) app.setEnterDrop(d.enterDrop);
+        if (d.stayParked != null) app.setEnterStayParked(d.stayParked);
+        app.setHoverCallback((i) => self.postMessage({ type: 'hover', index: i }));
+        last = performance.now();
+        loop();
+      } else if (d.type === 'resize' && app) {
+        if (d.enterScale != null) app.setEnterScale(d.enterScale);
+        if (d.enterDrop != null) app.setEnterDrop(d.enterDrop);
+        if (d.stayParked != null) app.setEnterStayParked(d.stayParked);
+        app.setSize(d.w, d.h, d.dpr);
+      } else if (d.type === 'mouse' && app) {
+        app.setMouse(d.x, d.y, d.active);
+      } else if (d.type === 'enter' && app) {
+        app.setEnterTarget(d.target);
+      }
+    };
+  `;
+
+  /* ============================================================
+     BOOTSTRAP
+     ============================================================ */
+  // Per-ring tooltip content (index 0 = outer ring … edit freely).
+  const ICON = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABIAAAASCAYAAABWzo5XAAACM0lEQVR4AZRRQWhTQRB9uzEBoan/Kh6MhxRyMjlUKbaSgDnaetBbQNtjwdzVuzcvKXg0CfRkDmKvCqnaUrCHxJPYBBJB0eO3KQjp/xlntn9/0k8pZthhd9/svHkzq3GGdY4/5bvD3erBcKfXGe5Q4C3Bvnkf752RglNEvb97KU5qglSTQI8UkMLYsoLpkX7T5QI92puMjYkOhrtZL+a1OC/Pfu4iLuAd+y3JsQ+NIlGiMGoCysH/m6NATavMEPkxf1oSW85hZVW56C4PT6TKJeq1jdf48f2X8Tqfo/HgnpfP0RjFVgIg3A7dAUrFx6hXGlCMitc2Glh/8ASH7hGipkg/1PwT2cmAKFi+sYaf/d/YfF/BlauXjW++q+Drly6W51eNwskcgPIyo5BISFbm1zDgqpbEJgjhy8ZzDP6w2jtlJu3YEAhICVEICAGzI3lpRoIhbg9JZwZJJ8lkR5jls8Vl59bQR2CZ62ls7VehFFDiqqIwCJl2SsUyFJff2n9l2rUxhtqaS3+wgOzSgsxDyNbvPzXDPRl+GbOsNNqy5GiotlaaaoiYkL39XMXN2zmOELtC8e4SpIDEGDi1SI3qOh1f2mZUnLfxkhk8e8EqeCaT5/GLkxOX6QuHlqvnx1Z5d9mnXOT68VhBkgxR5uJCn6AEmIKMXIIuZNSC+SxDJIxziVttVpYjwARwvm178Qs5ybHPQiIBRNlcYvEa/3GBCHXG2uxmSQEFVZNYOrEYKjFBAP8AAAD//88+focAAAAGSURBVAMA/yvxV6TX0DUAAAAASUVORK5CYII=';
+  // index 0 = outer ring, 1 = middle, 2 = core (innermost)
+  const RING_CONTENT = [
+    { title: 'Human Identity', body: 'Protects human identity while extending humanity into the universe.' },
+    { title: 'The Enterprise', body: 'Reinvents and runs the corporation.' },
+    { title: 'AI Core', body: 'Orchestrates execution — not a bolt-on.' }
+  ];
+
+  (function () {
+    const stage = document.getElementById('stage');
+    const canvas = document.createElement('canvas');
+    stage.appendChild(canvas);
+
+    // --- tooltip card ---
+    const card = document.getElementById('card');
+    const cardIcon = document.getElementById('cardIcon');
+    const cardTitle = document.getElementById('cardTitle');
+    const cardBody = document.getElementById('cardBody');
+    const bgSpot = document.getElementById('bgSpot');
+    cardIcon.src = ICON;
+
+    // --- ping-pong (boomerang) playback: forward, then reverse, repeating, so
+    //     the loop is seamless. Driven by hand from one clock because browsers
+    //     don't reliably support reverse playback; both layers share the time. ---
+    (function pingPongVideos() {
+      const vids = [document.querySelector('.bg-video'), bgSpot];
+      if (!vids[0] && !vids[1]) return;   // no background video present -> nothing to drive
+      let dir = 1, t = 0, last = null, primed = false;
+      function prime() {
+        if (primed) return; primed = true;       // unlock frame rendering (esp. iOS)
+        vids.forEach(v => { if (v) { v.muted = true; const p = v.play(); if (p) p.then(() => v.pause()).catch(() => {}); } });
+      }
+      vids.forEach(v => v && v.addEventListener('loadeddata', prime, { once: true }));
+      prime();
+      (function frame(ts) {
+        if (last === null) last = ts;
+        const dt = Math.min((ts - last) / 1000, 0.1); last = ts;
+        const dur = vids[0] && isFinite(vids[0].duration) ? vids[0].duration : 0;
+        if (dur > 0) {
+          t += dir * dt;
+          if (t >= dur) { t = dur; dir = -1; }      // hit the end -> go backward
+          else if (t <= 0) { t = 0; dir = 1; }      // back at start -> go forward
+          for (const v of vids) { if (v && v.readyState >= 1) { try { v.currentTime = t; } catch (e) {} } }
+        }
+        requestAnimationFrame(frame);
+      })(0);
+    })();
+    let lastClient = { x: 0, y: 0 };
+    let shownRing = -1;
+    let applyEnter = function () {}; // routes the enter target into the scene
+
+    /* ---- background-video cloud reveal (performance-safe) --------------
+       The video layer (#bgClouds) masks in from the bottom-centre in a
+       cloud-like form. The mask texture is static (baked once); we animate
+       only its mask-size (the cloud grows to fill) and a short opacity fade
+       so nothing pops. No per-frame filter. Fired by postMessage
+       ({type:'sx-reveal'}) at the Enter-Site handoff; a fallback timer
+       guarantees the video never stays hidden; 'sx-reveal-skip' shows it
+       instantly (repeat visits with no intro). */
+    const REVEAL = { dur: 2600, fallbackMs: 2800, sizeFrom: 28, sizeTo: 340, fadeIn: 0.32 };
+    const bgClouds = document.getElementById('bgClouds');
+    let revealDone = false, revealRunning = false, revealTimer = null, bakedMask = null;
+    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+    function paintReveal(p) {
+      if (!bgClouds) return;
+      const e = easeOutCubic(p);
+      const size = (REVEAL.sizeFrom + (REVEAL.sizeTo - REVEAL.sizeFrom) * e).toFixed(1) + '%';
+      bgClouds.style.webkitMaskSize = size;
+      bgClouds.style.maskSize = size;
+      // gentle fade-in over the first stretch so the cloud doesn't pop on
+      bgClouds.style.opacity = Math.min(1, p / REVEAL.fadeIn).toFixed(3);
+    }
+    function finishReveal() {
+      revealDone = true;
+      if (bgClouds) {
+        // Drop the mask ENTIRELY and stay fully visible. Set these inline (not
+        // via a CSS class) so the inline baked mask can't override them — that
+        // override is what made the video collapse back after revealing.
+        bgClouds.style.webkitMaskImage = 'none';
+        bgClouds.style.maskImage = 'none';
+        bgClouds.style.webkitMaskSize = '';
+        bgClouds.style.maskSize = '';
+        bgClouds.style.opacity = '1';        // stays in once faded in
+        bgClouds.classList.add('sx-shown');
+      }
+    }
+    function hideCoverInstant() { if (revealDone) return; clearTimeout(revealTimer); finishReveal(); }
+    function resetReveal() {
+      clearTimeout(revealTimer);
+      revealDone = false; revealRunning = false;
+      if (bgClouds) {
+        bgClouds.classList.remove('sx-shown');
+        if (bakedMask) { bgClouds.style.webkitMaskImage = bakedMask; bgClouds.style.maskImage = bakedMask; }
+      }
+      paintReveal(0);
+    }
+    function startReveal() {
+      if (revealDone || revealRunning || !bgClouds) return;
+      revealRunning = true; clearTimeout(revealTimer);
+      const t0 = performance.now();
+      (function step(now) {
+        const p = Math.min(1, (now - t0) / REVEAL.dur);
+        paintReveal(p);
+        if (p < 1) requestAnimationFrame(step);
+        else finishReveal();
+      })(t0);
+    }
+    // Bake the cloud mask to a flat BITMAP synchronously with canvas fractal
+    // noise (bottom-weighted so it blooms from the bottom-centre). Animating
+    // mask-size on a bitmap is essentially free; animating it on a filtered
+    // SVG would re-run the noise every frame — the frame-killer we're avoiding.
+    (function bakeCloudMask() {
+      if (!bgClouds) return;
+      try {
+        const S = 512, c = document.createElement('canvas'); c.width = S; c.height = S;
+        const ctx = c.getContext('2d'), im = ctx.createImageData(S, S), d = im.data;
+        const rand = (x, y, s) => { let n = (x * 374761393 + y * 668265263 + s * 362437) | 0; n = (n ^ (n >> 13)) * 1274126177; return ((n ^ (n >> 16)) >>> 0) / 4294967295; };
+        const lerp = (a, b, t) => a + (b - a) * t, sm = (t) => t * t * (3 - 2 * t);
+        function vnoise(x, y, s) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
+          const tl = rand(xi, yi, s), tr = rand(xi + 1, yi, s), bl = rand(xi, yi + 1, s), br = rand(xi + 1, yi + 1, s);
+          return lerp(lerp(tl, tr, sm(xf)), lerp(bl, br, sm(xf)), sm(yf)); }
+        function fbm(x, y) { let a = 0, amp = 0.5, f = 1; for (let o = 0; o < 4; o++) { a += amp * vnoise(x * f, y * f, o * 97); f *= 2; amp *= 0.5; } return a; }
+        const sc = 6 / S;
+        for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+          const n = fbm(x * sc, y * sc);
+          const dx = (x - S / 2) / (S * 0.64), dy = (y - S) / (S * 1.0);
+          const rw = Math.max(0, 1 - Math.sqrt(dx * dx + dy * dy)); // 1 at bottom-centre -> 0 far
+          let a = (n * 0.82 + 0.18) * rw;
+          a = Math.max(0, Math.min(1, (a - 0.16) * 2.0));           // contrast into cloud
+          const i = (y * S + x) * 4; d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = (a * 255) | 0;
+        }
+        ctx.putImageData(im, 0, 0);
+        const url = 'url(' + c.toDataURL('image/png') + ')';
+        bakedMask = url;
+        bgClouds.style.webkitMaskImage = url;
+        bgClouds.style.maskImage = url;
+      } catch (e) { /* keep the CSS SVG mask as a fallback */ }
+    })();
+    paintReveal(0);                                   // load with the video hidden
+    // never leave the video hidden — reveal on its own if no cue arrives
+    revealTimer = setTimeout(startReveal, REVEAL.fallbackMs);
+    // expose for a standalone preview / manual triggering (unused in production)
+    window.sxStartReveal = startReveal;
+    window.sxResetReveal = resetReveal;
+
+    function positionCard(x, y) {
+      const off = 18 * (window.innerWidth / 1440); // cursor offset scales with width
+      const cw = card.offsetWidth || 260, ch = card.offsetHeight || 100;
+      let left = x + off, top = y + off;
+      if (left + cw > window.innerWidth - 8) left = x - cw - off;
+      if (top + ch > window.innerHeight - 8) top = y - ch - off;
+      card.style.left = left + 'px';
+      card.style.top = top + 'px';
+    }
+    function onHover(index) {
+      if (index === shownRing) return;
+      shownRing = index;
+      if (index >= 0) {
+        const c = RING_CONTENT[index] || RING_CONTENT[0];
+        cardTitle.textContent = c.title;
+        cardBody.textContent = c.body;
+        positionCard(lastClient.x, lastClient.y);
+        card.classList.add('show');
+      } else {
+        card.classList.remove('show');
+      }
+    }
+    // --- cursor spotlight trail over the background video ---
+    const uScale = () => window.innerWidth / 1440; // px-at-1440 -> current px
+    const SPOT_LIFE = 700, SPOT_MAX = 26;
+    let trail = [];
+    function pushSpot(x, y) {
+      const now = performance.now();
+      const last = trail[trail.length - 1];
+      if (!last || Math.hypot(x - last.x, y - last.y) > 12 || now - last.t > 40) {
+        trail.push({ x: x, y: y, t: now });
+        if (trail.length > SPOT_MAX) trail.shift();
+      }
+    }
+    function hideSpot() {}  // trail fades on its own as the points age out
+    (function spotLoop() {
+      if (!bgSpot) return;                // no background video present -> no spotlight
+      const now = performance.now();
+      trail = trail.filter(p => now - p.t < SPOT_LIFE);
+      let mask;
+      if (trail.length) {
+        const R = 100 * uScale(); // spotlight radius scales with viewport width
+        // newest first so it sits on top; each point's alpha fades with age
+        mask = trail.slice().reverse().map(p => {
+          const k = 1 - (now - p.t) / SPOT_LIFE;   // 1 = newest, 0 = oldest
+          const a = (k * k).toFixed(3);            // eased fade
+          return 'radial-gradient(circle ' + R + 'px at ' + p.x + 'px ' + p.y +
+                 'px, rgba(0,0,0,' + a + ') 0%, rgba(0,0,0,0) 70%)';
+        }).join(',');
+      } else {
+        mask = 'linear-gradient(rgba(0,0,0,0), rgba(0,0,0,0))'; // nothing -> hidden
+      }
+      bgSpot.style.webkitMaskImage = mask;
+      bgSpot.style.maskImage = mask;
+      requestAnimationFrame(spotLoop);
+    })();
+
+    function trackClient(e) {
+      lastClient.x = e.clientX; lastClient.y = e.clientY;
+      if (shownRing >= 0) positionCard(e.clientX, e.clientY);
+      pushSpot(e.clientX, e.clientY); // feed the spotlight trail
+    }
+
+    const supportsOffscreen =
+      typeof canvas.transferControlToOffscreen === 'function' &&
+      typeof Worker !== 'undefined' &&
+      typeof OffscreenCanvas !== 'undefined';
+
+    const sizeOf = () => ({
+      w: stage.clientWidth,
+      h: stage.clientHeight,
+      dpr: Math.min(self.devicePixelRatio || 1, 2)
+    });
+
+    if (supportsOffscreen) {
+      const off = canvas.transferControlToOffscreen();
+      const blob = new Blob([WORKER_SRC], { type: 'text/javascript' });
+      const worker = new Worker(URL.createObjectURL(blob));
+      const s = sizeOf();
+      off.width = s.w * s.dpr; off.height = s.h * s.dpr;
+      worker.postMessage(
+        { type: 'init', canvas: off, cfg: CONFIG, size: s,
+          enterScale: enterScaleFor(window.innerWidth), enterDrop: enterDropFor(window.innerWidth),
+          stayParked: stayParkedFor(window.innerWidth) },
+        [off]
+      );
+      const ro = new ResizeObserver(() => {
+        const n = sizeOf();
+        worker.postMessage({ type: 'resize', w: n.w, h: n.h, dpr: n.dpr,
+          enterScale: enterScaleFor(window.innerWidth), enterDrop: enterDropFor(window.innerWidth),
+          stayParked: stayParkedFor(window.innerWidth) });
+      });
+      ro.observe(stage);
+
+      applyEnter = (t) => worker.postMessage({ type: 'enter', target: t });
+
+      worker.onmessage = (e) => {
+        if (e.data && e.data.type === 'hover') onHover(e.data.index);
+      };
+
+      const ndc = (e) => {
+        trackClient(e);
+        const r = stage.getBoundingClientRect();
+        worker.postMessage({
+          type: 'mouse',
+          x: ((e.clientX - r.left) / r.width) * 2 - 1,
+          y: -((e.clientY - r.top) / r.height) * 2 + 1,
+          active: true
+        });
+      };
+      stage.addEventListener('mousemove', ndc);
+      stage.addEventListener('mouseleave', () => {
+        onHover(-1); hideSpot();
+        worker.postMessage({ type: 'mouse', x: 0, y: 0, active: false });
+      });
+    } else {
+      // Main-thread fallback (older browsers without OffscreenCanvas)
+      const s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+      s.onload = () => {
+        const app = makeScene(canvas, window.THREE, CONFIG, sizeOf());
+        app.setHoverCallback(onHover);
+        app.setEnterScale(enterScaleFor(window.innerWidth));
+        app.setEnterDrop(enterDropFor(window.innerWidth));
+        app.setEnterStayParked(stayParkedFor(window.innerWidth));
+        applyEnter = (t) => app.setEnterTarget(t);
+        let last = performance.now();
+        (function raf() {
+          const now = performance.now();
+          app.update(Math.min((now - last) / 1000, 0.1)); last = now;
+          app.render();
+          requestAnimationFrame(raf);
+        })();
+        new ResizeObserver(() => {
+          const n = sizeOf();
+          app.setEnterScale(enterScaleFor(window.innerWidth));
+          app.setEnterDrop(enterDropFor(window.innerWidth));
+          app.setEnterStayParked(stayParkedFor(window.innerWidth));
+          app.setSize(n.w, n.h, n.dpr);
+        }).observe(stage);
+
+        stage.addEventListener('mousemove', (e) => {
+          trackClient(e);
+          const r = stage.getBoundingClientRect();
+          app.setMouse(
+            ((e.clientX - r.left) / r.width) * 2 - 1,
+            -((e.clientY - r.top) / r.height) * 2 + 1,
+            true
+          );
+        });
+        stage.addEventListener('mouseleave', () => { onHover(-1); hideSpot(); app.setMouse(0, 0, false); });
+      };
+      document.head.appendChild(s);
+    }
+
+    // --- enter state: driven ENTIRELY by the parent section's scroll, via
+    //     postMessage({ type:'sx-enter', value:true|false }). This embed never
+    //     scrolls itself. ---
+    const fades = Array.prototype.slice.call(document.querySelectorAll('.hero, .scroll-hint'));
+    const setHide = (h) => fades.forEach(el => el.classList.toggle('hide', h));
+    const intro = document.querySelector('.intro');
+    const introShow = (s) => { if (intro) intro.classList.toggle('show', s); };
+    let isEntered = false, heroTimer = null;
+    function setEntered(on) {
+      on = !!on;
+      if (on === isEntered) return;        // only act on a real state change
+      isEntered = on;
+      applyEnter(on ? 1 : 0);
+      clearTimeout(heroTimer);
+      if (on) {
+        setHide(true);                     // first-state copy fades out immediately
+        // second-state copy fades in once the rings have settled, and its
+        // title/body play the same wipe + line-slide treatment (once)
+        heroTimer = setTimeout(() => { introShow(true); playIntroPanel(); }, CONFIG.enterDur * 1000);
+      } else {
+        introShow(false);                  // second-state copy fades out immediately
+        // first-state copy returns once the rings are back
+        heroTimer = setTimeout(() => setHide(false), CONFIG.enterDur * 1000);
+      }
+    }
+    // --- intro animations: title wipe + per-line body slide-up. Runs on TWO
+    //     groups at their own moments: the hero (.hero) at the Enter-Site
+    //     handoff, and the second-state panel (.intro) when it enters. In each:
+    //   • the title wipes in first
+    //   • the body slides up per line, BODY_LINES_DELAY after the title begins
+    //     (line 2 staggers another 0.2s — handled in the body-lines CSS)
+    const TITLE_WIPE_DELAY = 0;      // ms after the handoff before the hero title wipes in
+    const BODY_LINES_DELAY = 200;    // ms after the title starts before the body slides up
+    function runWipesIn(root) { if (window.sxRunWipes) window.sxRunWipes(root); else setTimeout(function () { runWipesIn(root); }, 100); }
+    function runLinesIn(root) { if (window.sxRunLines) window.sxRunLines(root); else setTimeout(function () { runLinesIn(root); }, 100); }
+    function playGroup(root) {                      // wipe the title, then slide the body lines
+      runWipesIn(root);
+      setTimeout(function () { runLinesIn(root); }, BODY_LINES_DELAY);
+    }
+    let heroPlayed = false, introPlayed = false;
+    function playHeroIntro() { if (heroPlayed) return; heroPlayed = true; playGroup(document.querySelector('.hero')); }
+    function playIntroPanel() { if (introPlayed) return; introPlayed = true; playGroup(document.querySelector('.intro')); }
+    // background shape-grid entrance swipe (fires with the header, on the handoff)
+    function gridEnter() { if (window.sxGridEnter) window.sxGridEnter(); else setTimeout(gridEnter, 100); }
+    function gridEnterSkip() { if (window.sxGridEnterSkip) window.sxGridEnterSkip(); else setTimeout(gridEnterSkip, 100); }
+    // opened standalone (not embedded under the intro overlay) -> self-trigger the
+    // hero so its text isn't left hidden; on the real site the handoff drives it.
+    if (window.self === window.top) setTimeout(function () { playHeroIntro(); gridEnter(); }, 1200);
+
+    window.addEventListener('message', (e) => {
+      const d = e.data;
+      if (!d) return;
+      if (d.type === 'sx-enter') setEntered(!!d.value);
+      else if (d.type === 'sx-reveal') {                       // Enter-Site handoff (first entry)
+        startReveal();
+        setTimeout(function () { playHeroIntro(); gridEnter(); }, TITLE_WIPE_DELAY);
+      }
+      else if (d.type === 'sx-reveal-skip') {                  // repeat visit / reload (no overlay) -> still play the intro
+        hideCoverInstant();
+        playHeroIntro();
+        gridEnter();                                           // grid entrance swipe too, matching the header text
+      }
+    });
+    // tell the parent (Velo) we're mounted so it can (re)send the current state
+    function pingReady() { try { if (window.parent) window.parent.postMessage({ type: 'ready' }, '*'); } catch (e) {} }
+    pingReady();
+    [150, 500, 1200].forEach(t => setTimeout(pingReady, t));
+  })();
+  </script>
+
+  <!-- ============================================================
+       BACKGROUND SHAPE GRID  (6px, pulsating)
+       A full-screen ascii-style grid of the 3 brand shapes (disc-with-chevron,
+       chevron, dot), one picked at random per cell, with a pulse wave sweeping
+       through. Drawn on the GPU: the 3 shapes are baked into a texture atlas
+       once, then a fragment shader tiles them and modulates brightness by a
+       travelling wave. Tune via CFG (cell size, opacity, blank chance) and the
+       w1/w2 wave terms in the shader.
+       ============================================================ -->
+  <script>
+  (function () {
+    var cv = document.getElementById('shapeGrid');
+    if (!cv) return;
+    var gl = cv.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false });
+    if (!gl) return;
+    var CFG = { cell: 6, base: 0.10, empty: 0.14, shift: 60, ease: 0.08, swipe: 0.30, enterDur: 1800, waveBoost: 11,
+      trailR: 4, trailLife: 550, trailBoost: 3.2 };  // cursor trail: cell-hit radius px, fade ms, green opacity mult
+    // base = resting opacity, swipe = entrance-swipe peak opacity, enterDur = ms for the swipe
+    var D = [
+      "M40.942 0C18.33 0 0 18.33 0 40.94c0 22.612 18.33 40.942 40.942 40.942 22.61 0 40.94-18.33 40.94-40.941S63.552 0 40.942 0M27.768 67.527l2.354 2.5 5.608-4.88 23.928-20.82.966-.84-.047-1.164-.114-2.879-.047-1.17-.822-.673L44.34 25.12 29.472 12.954l-1.343-1.1-.981 1.343-2.748 3.751-.746 1.02 21.313 23.44L26.451 61.78l-1.943 2.137-.068.075.066.07z",
+      "m26.57 67.526 2.353 2.5 5.61-4.88 23.927-20.82.965-.84-.046-1.164-.116-2.879-.046-1.17-.821-.673-15.254-12.48-14.869-12.167-1.343-1.1-.982 1.343-2.747 3.751-.746 1.02 21.312 23.44-18.516 20.372-1.942 2.137-.068.075.066.07z",
+      "M32.673 32.841c-2.129 2.079-3.21 4.708-3.21 7.723 0 3.186 1.07 6.007 3.21 8.313l.014.014.013.014c2.198 2.3 4.94 3.511 8.092 3.511 2.109 0 4.085-.56 5.878-1.667a11.4 11.4 0 0 0 4.121-4.113 11.4 11.4 0 0 0 1.626-5.922c0-3.135-1.193-5.852-3.491-7.995-2.255-2.153-5.01-3.255-8.134-3.255-3.032 0-5.71 1.082-7.91 3.178z"
+    ];
+    var rules = ['evenodd', 'nonzero', 'nonzero']; // shape 1 = disc with knockout
+    function buildAtlas() {
+      var TILE = 96, a = document.createElement('canvas'); a.width = TILE * 3; a.height = TILE;
+      var x = a.getContext('2d'); x.fillStyle = '#fff';
+      var VB = 82, scale = (TILE * 0.82) / VB, P = D.map(function (d) { return new Path2D(d); });
+      for (var i = 0; i < 3; i++) { x.save(); x.translate(i * TILE + TILE / 2, TILE / 2); x.scale(scale, scale); x.translate(-VB / 2, -VB / 2); x.fill(P[i], rules[i]); x.restore(); }
+      return a;
+    }
+    var VS = 'attribute vec2 p; void main(){ gl_Position=vec4(p,0.,1.); }';
+    var FS = 'precision highp float;' +
+      'uniform sampler2D uAtlas; uniform float uTime, uCell, uDpr, uBase, uEmpty, uShift, uEnter, uSwipe, uWaveT, uTrailR, uTrailBoost; uniform vec2 uMouse, uRes; uniform vec3 uTrail[24];' +
+      'float hash(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }' +
+      'void main(){' +
+      '  vec2 frag=gl_FragCoord.xy - vec2(uMouse.x, -uMouse.y)*uShift*uDpr; float cs=uCell*uDpr;' +   // parallax toward the cursor (repel)
+      '  vec2 cellId=floor(frag/cs); vec2 local=fract(frag/cs); local.y=1.0-local.y;' +
+      '  float w1=sin(dot(cellId, vec2(0.62,0.78))*0.10 - uWaveT*1.7);' +   // uWaveT runs fast on entrance, eases to normal
+      '  float w2=sin(dot(cellId, vec2(-0.5,0.66))*0.07 - uWaveT*1.1);' +
+      '  float wv=clamp(0.5+0.5*(0.62*w1+0.38*w2), 0.0, 1.0);' +   // wave 0..1 (the light)
+      // shape driven by the light + per-cell jitter: strong light -> heavy shape
+      // (disc=0), middle -> chevron=1, weak light -> light shape (dot=2)
+      '  float sel=clamp(wv + (hash(cellId)-0.5)*0.9, 0.0, 1.0);' +
+      '  float si = sel>0.6667 ? 0.0 : (sel>0.3333 ? 1.0 : 2.0);' +
+      '  float a=texture2D(uAtlas, vec2((si+local.x)/3.0, local.y)).a;' +
+      '  float pulse=0.35 + 0.65*wv;' +                            // brightness follows the light
+      '  float blank=step(uEmpty, hash(cellId+vec2(19.0,7.0)));' +
+      // entrance: one big swipe sweeps across, revealing the grid at the swipe
+      // peak (uSwipe) and settling to the resting base (uBase) behind it.
+      '  float cp=(gl_FragCoord.x/uRes.x*0.62 + gl_FragCoord.y/uRes.y*0.78)/1.4;' +   // swipe axis: bottom-left -> up-right (matches the wave flow)
+      '  float W=0.16;' +                                          // swipe band half-width
+      '  float f=uEnter*(1.0+3.0*W) - W;' +                        // front sweeps from -W to past the far edge
+      '  float rev=clamp((f-cp)/0.03 + 0.5, 0.0, 1.0);' +          // 0 ahead of the swipe, 1 once it passes
+      '  float boost=exp(-pow((cp-f)/W, 2.0));' +                  // bright band at the front
+      '  float baseNow=rev*mix(uBase, uSwipe, boost);' +           // hidden ahead, uSwipe at the swipe, uBase resting
+      '  float A=a*pulse*blank*baseNow;' +
+      // cursor trail: green tint + slight lift for shapes near recent mouse movement
+      '  float onTrail=0.0;' +                                       // hard binary: a whole cell is green or it isn't
+      '  vec2 cc=(cellId+0.5)*cs + vec2(uMouse.x, -uMouse.y)*uShift*uDpr;' +  // this cell centre in screen space (snap to grid)
+      '  for(int i=0;i<23;i++){ vec3 pa3=uTrail[i]; vec3 pb3=uTrail[i+1];' +
+      '    if(pa3.z<=0.0||pb3.z<=0.0) continue;' +                    // both endpoints must be alive
+      '    vec2 pa=cc-pa3.xy; vec2 ba=pb3.xy-pa3.xy;' +              // measure to the CELL, not the pixel
+      '    float h=clamp(dot(pa,ba)/max(dot(ba,ba),1.0),0.0,1.0);' +  // nearest point on the segment
+      '    float d=length(pa-ba*h);' +
+      '    if(d<uTrailR) onTrail=1.0; }' +                            // line passes through the cell -> whole shape lights
+      '  float A2 = onTrail>0.5 ? a*blank*uBase*uTrailBoost : A;' +   // green cells at fixed opacity, no falloff
+      '  vec3 col = onTrail>0.5 ? vec3(0.859,0.980,0.769) : vec3(1.0);' +   // #DBFAC4 or plain, no blend
+      '  gl_FragColor=vec4(col*A2, A2);' +   // PREMULTIPLIED white/green -> identical compositing on Safari & Chrome
+      '}';
+    function sh(t, s) { var o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; }
+    var prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+    var buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    var loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA); // premultiplied
+    var tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, buildAtlas());
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    var U = {
+      time: gl.getUniformLocation(prog, 'uTime'), cell: gl.getUniformLocation(prog, 'uCell'),
+      dpr: gl.getUniformLocation(prog, 'uDpr'), base: gl.getUniformLocation(prog, 'uBase'),
+      empty: gl.getUniformLocation(prog, 'uEmpty'), atlas: gl.getUniformLocation(prog, 'uAtlas'),
+      mouse: gl.getUniformLocation(prog, 'uMouse'), shift: gl.getUniformLocation(prog, 'uShift'),
+      enter: gl.getUniformLocation(prog, 'uEnter'), swipe: gl.getUniformLocation(prog, 'uSwipe'),
+      res: gl.getUniformLocation(prog, 'uRes'), waveT: gl.getUniformLocation(prog, 'uWaveT'),
+      trail: gl.getUniformLocation(prog, 'uTrail'), trailR: gl.getUniformLocation(prog, 'uTrailR'),
+      trailBoost: gl.getUniformLocation(prog, 'uTrailBoost')
+    };
+    var waveT = 0, waveLast = performance.now();   // warped wave time: fast on entrance, eases to normal
+    // cursor trail: recent movement points; each fades over trailLife (nothing added while static)
+    var trail = [], trailArr = new Float32Array(24 * 3);
+    function pushTrail(cx, cy) {
+      var now = performance.now(), last = trail[trail.length - 1];
+      if (!last || Math.hypot(cx - last.cx, cy - last.cy) > 4 || now - last.t > 40) {
+        trail.push({ cx: cx, cy: cy, t: now });
+        if (trail.length > 24) trail.shift();
+      }
+    }
+    var dpr = 1;
+    // --- entrance swipe: starts hidden; on the Enter-Site handoff a big swipe
+    //     sweeps across and eases into the resting pulse flow (fires once) ---
+    var enter = 0, entering = false, enterStart = 0, enterDone = false;
+    function startEnter() { if (entering || enterDone) return; entering = true; enterStart = performance.now(); }
+    function skipEnter() { if (enterDone) return; enter = 1; entering = false; enterDone = true; } // repeat visits: show at rest, no swipe
+    window.sxGridEnter = startEnter;
+    window.sxGridEnterSkip = skipEnter;
+    // --- cursor parallax: grid drifts opposite the pointer, eased ---
+    var mx = 0, my = 0, tmx = 0, tmy = 0;   // smoothed + target, -1..1 across the viewport
+    window.addEventListener('mousemove', function (e) {
+      tmx = (e.clientX / window.innerWidth) * 2 - 1;
+      tmy = (e.clientY / window.innerHeight) * 2 - 1;
+      pushTrail(e.clientX, e.clientY);   // feed the green trail (only while moving)
+    });
+    window.addEventListener('mouseleave', function () { tmx = 0; tmy = 0; }); // recenter when the cursor leaves
+    function size() {
+      var W = cv.clientWidth || window.innerWidth, H = cv.clientHeight || window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cv.width = W * dpr; cv.height = H * dpr; gl.viewport(0, 0, cv.width, cv.height);
+    }
+    size();
+    if ('ResizeObserver' in window) new ResizeObserver(size).observe(cv); else window.addEventListener('resize', size);
+    var t0 = performance.now();
+    (function loop() {
+      mx += (tmx - mx) * CFG.ease; my += (tmy - my) * CFG.ease;   // ease toward the cursor
+      if (entering) {                                             // easeOutCubic swipe -> settles into the flow
+        var e = Math.min(1, (performance.now() - enterStart) / CFG.enterDur);
+        enter = 1 - Math.pow(1 - e, 3);
+        if (e >= 1) { enter = 1; entering = false; enterDone = true; }
+      }
+      // warped wave time: rate boosted while the entrance is early, easing to 1x
+      // over the same envelope as the swipe -> waves rush across then slow down
+      var wnow = performance.now(), wdt = Math.min((wnow - waveLast) / 1000, 0.05); waveLast = wnow;
+      waveT += wdt * (1 + CFG.waveBoost * (1 - enter));
+      gl.uniform1f(U.time, (performance.now() - t0) / 1000);
+      gl.uniform1f(U.cell, CFG.cell); gl.uniform1f(U.dpr, dpr);
+      gl.uniform1f(U.base, CFG.base); gl.uniform1f(U.empty, CFG.empty);
+      gl.uniform2f(U.mouse, mx, my); gl.uniform1f(U.shift, CFG.shift);
+      gl.uniform1f(U.enter, enter); gl.uniform1f(U.swipe, CFG.swipe);
+      gl.uniform2f(U.res, cv.width, cv.height); gl.uniform1f(U.waveT, waveT); gl.uniform1i(U.atlas, 0);
+      // build the trail uniform (device px, bottom-up Y, life 1->0); expired points drop out
+      var tnow = performance.now(), k = 0;
+      for (var i = trail.length - 1; i >= 0 && k < 24; i--) {
+        var age = (tnow - trail[i].t) / CFG.trailLife;
+        if (age >= 1) continue;
+        trailArr[k * 3] = trail[i].cx * dpr;
+        trailArr[k * 3 + 1] = (window.innerHeight - trail[i].cy) * dpr;
+        trailArr[k * 3 + 2] = 1 - age;
+        k++;
+      }
+      for (var j = k; j < 24; j++) trailArr[j * 3 + 2] = 0;   // zero out remaining slots' life
+      gl.uniform3fv(U.trail, trailArr);
+      gl.uniform1f(U.trailR, CFG.trailR * dpr); gl.uniform1f(U.trailBoost, CFG.trailBoost);
+      gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT); gl.drawArrays(gl.TRIANGLES, 0, 3);
+      requestAnimationFrame(loop);
+    })();
+  })();
+  </script>
+
+  <!-- ============================================================
+       Title intro wipe (sx-wipe): pixelated green -> text-colour reveal.
+       Applied to the hero title via class="sx-wipe". Self-contained.
+       ============================================================ -->
+  <style>
+    .sx-wipe{ position:relative; overflow:hidden; display:inline-block;
+      /* room for descenders (g, y …) so the overflow:hidden wipe box doesn't
+         shear them; negative margin cancels it so layout/spacing is unchanged */
+      padding-bottom:.14em; margin-bottom:-.14em; }
+    .sx-wipe .sx-wipe-txt{ visibility:hidden; }
+    .sx-wipe .sx-wipe-cv{ position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
+  </style>
+  <script>
+  (function () {
+    var CLASS='sx-wipe';
+    var GREEN='#DBFAC4';
+    var SPEED=0.7;                                    // scale timing (1 ≈ 2s)
+    var OFFSET=150, DCOVER=760, HOLD=50, DREVEAL=760; // ms
+    var EASE=[.85,0,.15,1];                           // easing
+    var CELL=7, BAND=52, FLICK=0.34, OVER=0.8;        // square size, fray depth, shimmer, overlap
+    var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function cubicBezier(p1x,p1y,p2x,p2y){
+      var cx=3*p1x,bx=3*(p2x-p1x)-cx,ax=1-cx-bx, cy=3*p1y,by=3*(p2y-p1y)-cy,ay=1-cy-by;
+      function fx(t){return ((ax*t+bx)*t+cx)*t;} function fy(t){return ((ay*t+by)*t+cy)*t;}
+      function dfx(t){return (3*ax*t+2*bx)*t+cx;}
+      return function(x){ if(x<=0)return 0; if(x>=1)return 1; var t=x;
+        for(var i=0;i<8;i++){ var e=fx(t)-x, d=dfx(t); if(Math.abs(e)<1e-4)break; if(Math.abs(d)<1e-6)break; t-=e/d; }
+        t=t<0?0:t>1?1:t; return fy(t); }; }
+    var ease=cubicBezier(EASE[0],EASE[1],EASE[2],EASE[3]);
+    function hash(x,y,s){ var h=(x*374761393)^(y*668265263)^(s*2246822519); h=(h^(h>>13))>>>0; h=(h*1274126177)>>>0; return ((h^(h>>16))>>>0)/4294967295; }
+    function textColor(root){                       // Wix puts the colour on an inner span, so dig down to the text
+      var col=getComputedStyle(root).color, n=root, guard=0;
+      while(n && guard++<10){ var child=null;
+        for(var i=0;i<n.children.length;i++){ if((n.children[i].textContent||'').trim()){ child=n.children[i]; break; } }
+        if(!child) break; n=child; col=getComputedStyle(n).color; }
+      return col; }
+    function prep(el){ if(el._sxP) return; el._sxP=true;
+      el._color=textColor(el);
+      el.innerHTML='<span class="sx-wipe-txt">'+el.innerHTML+'</span>';
+      var cv=document.createElement('canvas'); cv.className='sx-wipe-cv'; el.appendChild(cv);
+      el._cv=cv; el._txt=el.querySelector('.sx-wipe-txt'); }
+    function size(el){ var r=el.getBoundingClientRect();
+      var W=Math.max(1,Math.ceil(r.width)), H=Math.max(1,Math.ceil(r.height)), dpr=Math.min(window.devicePixelRatio||1,2);
+      el._cv.width=W*dpr; el._cv.height=H*dpr; var ctx=el._cv.getContext('2d'); ctx.setTransform(dpr,0,0,dpr,0,0);
+      el._W=W; el._H=H; el._ctx=ctx; }
+    function reset(el){ if(!el._sxP) return; el._sxStop=true; el._sxBusy=false;
+      if(el._txt) el._txt.style.visibility='hidden';
+      if(el._ctx) el._ctx.clearRect(0,0,el._W||0,el._H||0); }
+    function run(el){ prep(el); if(el._sxBusy) return; size(el); el._sxBusy=true; el._sxStop=false;
+      var W=el._W,H=el._H,ctx=el._ctx,txt=el._txt;
+      var o=OFFSET*SPEED,dc=DCOVER*SPEED,h=HOLD*SPEED,dr=DREVEAL*SPEED;
+      var RS=o+dc+h, RSg=RS+o, END=RSg+dr;
+      txt.style.visibility='hidden';
+      if(reduce){ txt.style.visibility='visible'; el._sxBusy=false; return; }
+      function seg(t,a,b){ if(t<=a)return 0; if(t>=b)return 1; return ease((t-a)/(b-a)); }
+      function edge(edgeX,dir,seed){
+        var g0=Math.floor((edgeX-BAND)/CELL), g1=Math.ceil((edgeX+BAND)/CELL);
+        for(var gx=g0; gx<=g1; gx++){ var cx=gx*CELL+CELL/2; if(cx<0||cx>W) continue;
+          var dist=dir*(cx-edgeX);
+          for(var gy=0; gy*CELL<H; gy++){
+            var p=dist/BAND*0.5+0.5+(Math.random()-0.5)*FLICK;
+            if(p>hash(gx,gy,seed)) ctx.fillRect(gx*CELL, gy*CELL, CELL+OVER, CELL+OVER);
+          } } }
+      function bar(fr,color,seed){ var L=fr*W, R=L+W; ctx.fillStyle=color;
+        var cl=Math.max(0,L+BAND), cr=Math.min(W,R-BAND); if(cr>cl) ctx.fillRect(cl,0,cr-cl,H);
+        edge(L,1,seed); edge(R,-1,seed); }
+      var t0=performance.now(), shown=false;
+      function tick(now){ if(el._sxStop){ el._sxBusy=false; return; } var t=now-t0; ctx.clearRect(0,0,W,H);
+        var gF=seg(t,0,dc)-1+seg(t,RSg,RSg+dr);
+        var tF=seg(t,o,o+dc)-1+seg(t,RS,RS+dr);
+        if(!shown && t>=RS){ txt.style.visibility='visible'; shown=true; }
+        bar(gF,GREEN,0); bar(tF,el._color,91);
+        if(t<END+80) requestAnimationFrame(tick);
+        else { ctx.clearRect(0,0,W,H); el._sxBusy=false; } }
+      requestAnimationFrame(tick); }
+    function init(){ var list=Array.prototype.slice.call(document.getElementsByClassName(CLASS));
+      if(!list.length) return; list.forEach(prep);
+      // Do NOT auto-play. The embed calls window.sxRunWipes(root) at the right
+      // moment (hero on the Enter-Site handoff; intro panel on enter). Pass a
+      // container to wipe only titles inside it; omit to wipe all.
+      window.sxRunWipes=function(root){ list.forEach(function(el){ if(!root||root===document||root.contains(el)) run(el); }); }; }
+    function boot(){ (document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(function(){
+      var tries=0;(function r(){ if(document.getElementsByClassName(CLASS).length){ init(); } else if(tries++<40){ setTimeout(r,150); } })(); }); }
+    if(document.readyState!=='loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
+  })();
+  </script>
+
+  <!-- ============================================================
+       Body intro: per-line mask + slide-up (ease-out, fast start / slow out).
+       Each wrapped line is an overflow-hidden mask; the inner span slides up
+       from below. Line 2 staggers +0.2s (STAGGER). Triggered by the embed at
+       the Enter-Site handoff (window.sxRunLines), 0.2s after the title starts.
+       ============================================================ -->
+  <style>
+    /* pad the clip box below so descenders (g, y, p …) aren't sheared by the
+       overflow:hidden mask; the negative margin cancels the padding so line
+       spacing/layout is unchanged. translateY bumped 120%->150% so the extra
+       padded height still hides the text fully before it slides up. */
+    .sx-lines .sx-line { display: block; overflow: hidden; padding-bottom: .22em; margin-bottom: -.22em; }
+    .sx-lines .sx-line > span { display: inline-block; transform: translateY(150%);
+      transition: transform .8s cubic-bezier(.16, 1, .3, 1); will-change: transform; }
+    .sx-lines.sx-play .sx-line > span { transform: translateY(0); }
+  </style>
+  <script>
+  (function(){
+    var CLASS='sx-lines', STAGGER=0.2;   // seconds added per line (line 2 = +0.2s)
+    var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    // lay the words out inline, measure where they wrap, return one string per visual line
+    function splitToLines(el, text){
+      el.textContent='';
+      var words=text.split(' '), spans=[], i;
+      for(i=0;i<words.length;i++){ var s=document.createElement('span'); s.textContent=words[i]; el.appendChild(s); spans.push(s); if(i<words.length-1) el.appendChild(document.createTextNode(' ')); }
+      var lines=[], cur=null, last=null;
+      for(i=0;i<spans.length;i++){ var top=spans[i].offsetTop; if(last===null||Math.abs(top-last)>2){ cur=[]; lines.push(cur); last=top; } cur.push(spans[i].textContent); }
+      return lines.map(function(l){ return l.join(' '); });
+    }
+    // build the per-line mask + inner span structure from the measured line strings
+    function build(el, lineStrs){
+      el.textContent='';
+      for(var i=0;i<lineStrs.length;i++){
+        var line=document.createElement('span'); line.className='sx-line';
+        var inner=document.createElement('span');
+        inner.textContent=lineStrs[i];
+        inner.style.transitionDelay=(i*STAGGER)+'s';
+        if(reduce){ inner.style.transition='none'; inner.style.transform='none'; }
+        line.appendChild(inner); el.appendChild(line);
+      }
+    }
+    function prep(el){
+      if(el._sxL) return; el._sxL=true;
+      el._sxText=(el.textContent||'').replace(/\s+/g,' ').trim();   // keep the original for re-grouping
+      build(el, splitToLines(el, el._sxText));
+      if(reduce) el.classList.add('sx-play');
+    }
+    // Re-group for the CURRENT width. Fixes the desktop->tablet resize glitch
+    // where line breaks baked at the old width re-wrap into an extra line. If the
+    // element has already revealed, snap the rebuilt lines to their final position
+    // (no replayed slide-in).
+    function regroup(el){
+      if(!el._sxL || !el._sxText) return;
+      var played = el.classList.contains('sx-play');
+      build(el, splitToLines(el, el._sxText));
+      if(played){
+        el.classList.add('sx-play');
+        var inners = el.querySelectorAll('.sx-line > span'), i;
+        for(i=0;i<inners.length;i++){ inners[i].style.transition='none'; inners[i].style.transform='translateY(0)'; }
+        requestAnimationFrame(function(){ requestAnimationFrame(function(){
+          for(var j=0;j<inners.length;j++){ inners[j].style.transition=''; inners[j].style.transform=''; }
+        }); });
+      }
+    }
+    function run(el){ if(!el._sxL) prep(el); el.classList.add('sx-play'); }
+    function init(){ var list=[].slice.call(document.getElementsByClassName(CLASS));
+      if(!list.length) return; list.forEach(prep);
+      // Do NOT auto-play; the embed calls window.sxRunLines(root) per group.
+      window.sxRunLines=function(root){ list.forEach(function(el){ if(!root||root===document||root.contains(el)) run(el); }); };
+      // re-group on resize (debounced) so line breaks always match the current width
+      var rt; window.addEventListener('resize', function(){ clearTimeout(rt); rt=setTimeout(function(){ list.forEach(regroup); }, 160); });
+    }
+    function boot(){ (document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(function(){
+      var n=0;(function r(){ if(document.getElementsByClassName(CLASS).length){ init(); } else if(n++<40){ setTimeout(r,150); } })(); }); }
+    if(document.readyState!=='loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
+  })();
+  </script>
+
+  <!-- ============================================================
+       LENIS SCROLL PASS-THROUGH (Variant A — interactive, non-scrolling embed)
+       This hero is overflow:hidden so it can't scroll, but it still swallows
+       wheel/touch while hovered, starving the page-level Lenis and causing the
+       scroll to stutter. So: stop native scroll-chaining and forward the delta
+       up to the parent as {type:'sx-wheel'}, which smooth-scroll-lenis.html
+       (Custom Code › Head) replays as a real wheel event. Hover/click stay
+       intact. Embedded-only (no-op when opened standalone). See
+       SCROLL-PASSTHROUGH-NOTES.md.
+       ============================================================ -->
+  <script>
+  (function () {
+    if (window.parent === window) return; // not embedded — nothing to forward
+    if (window.matchMedia('(hover: none) and (pointer: coarse)').matches) return; // real touch (iPad/phone) -> native scroll with momentum, Lenis is off
+    var s = document.documentElement.style, b = document.body.style;
+    s.overscrollBehavior = b.overscrollBehavior = 'none';
+    s.touchAction = b.touchAction = 'none';
+    window.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      window.parent.postMessage({ type: 'sx-wheel', deltaY: e.deltaY, deltaX: e.deltaX }, '*');
+    }, { passive: false });
+    var tY = null, tX = null;
+    window.addEventListener('touchstart', function (e) {
+      if (e.touches.length === 1) { tY = e.touches[0].clientY; tX = e.touches[0].clientX; }
+    }, { passive: true });
+    window.addEventListener('touchmove', function (e) {
+      if (tY === null || e.touches.length !== 1) return;
+      e.preventDefault();
+      var y = e.touches[0].clientY, x = e.touches[0].clientX;
+      window.parent.postMessage({ type: 'sx-wheel', deltaY: tY - y, deltaX: tX - x }, '*');
+      tY = y; tX = x;
+    }, { passive: false });
+    window.addEventListener('touchend', function () { tY = tX = null; }, { passive: true });
+  })();
+  </script>
+
+</body></html>

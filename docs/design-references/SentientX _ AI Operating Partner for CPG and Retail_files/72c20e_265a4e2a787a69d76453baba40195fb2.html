@@ -1,0 +1,147 @@
+
+<!-- saved from url=(0088)https://www-sentientx-com.filesusr.com/html/72c20e_265a4e2a787a69d76453baba40195fb2.html -->
+<html style="overscroll-behavior: none; touch-action: none;"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><script>
+(function () {
+  if (customElements.get('progressive-blur-strip')) return;
+
+  var C1 = '#FFE0B7';   // peach
+  var C2 = '#DBFAC4';   // green
+
+  // [blurPx @ design width, maskStops]. Full blur at TOP -> sharp at BOTTOM.
+  var LAYERS = [
+    [22,  '#000 0%,#000 15%,transparent 36%'],
+    [12,  'transparent 6%,#000 24%,#000 40%,transparent 58%'],
+    [6,   'transparent 26%,#000 44%,#000 60%,transparent 78%'],
+    [3,   'transparent 46%,#000 64%,#000 80%,transparent 94%'],
+    [1.5, 'transparent 66%,#000 84%,#000 100%']
+  ];
+  var BLOB_BLUR = 80;   // gradient blob blur @ design width
+
+  var styleInjected = false;
+  function injectStyle(speed) {
+    if (styleInjected) return;
+    styleInjected = true;
+    var s = document.createElement('style');
+    s.textContent =
+      '.pbs-grad{position:absolute;inset:0;overflow:hidden;' +
+        '-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 35%,transparent 100%);' +
+        'mask-image:linear-gradient(to bottom,#000 0%,#000 35%,transparent 100%);}' +
+      '.pbs-blob{position:absolute;top:50%;left:50%;width:150%;height:900%;' +
+        'border-radius:50%;will-change:transform;}' +
+      '.pbs-a{background:radial-gradient(circle,' + C1 + ' 0%,rgba(255,224,183,.45) 35%,rgba(255,224,183,.12) 62%,rgba(255,224,183,0) 100%);' +
+        'animation:pbsA ' + speed + 's ease-in-out infinite alternate;}' +
+      '.pbs-b{background:radial-gradient(circle,' + C2 + ' 0%,rgba(219,250,196,.45) 35%,rgba(219,250,196,.12) 62%,rgba(219,250,196,0) 100%);' +
+        'animation:pbsB ' + (speed * 1.35) + 's ease-in-out infinite alternate;}' +
+      '@keyframes pbsA{0%{transform:translate(-95%,-60%) scale(1)}100%{transform:translate(15%,-40%) scale(1.25)}}' +
+      '@keyframes pbsB{0%{transform:translate(75%,-45%) scale(1.15)}100%{transform:translate(-35%,-55%) scale(.9)}}' +
+      '@media (prefers-reduced-motion: reduce){.pbs-a,.pbs-b{animation:none}}';
+    document.head.appendChild(s);
+  }
+
+  class ProgressiveBlurStrip extends HTMLElement {
+    connectedCallback() {
+      var el = this;
+      var design = parseFloat(el.getAttribute('data-design-width')) || 1920;
+      var H = parseFloat(el.getAttribute('data-height')) || 140;
+      // Mobile breakpoint: its own baseline width + height, scales proportionally.
+      var mDesign = parseFloat(el.getAttribute('data-mobile-design-width')) || 390;
+      var mH = parseFloat(el.getAttribute('data-mobile-height')) || 90;
+      var bp = parseFloat(el.getAttribute('data-breakpoint'));
+      bp = isNaN(bp) ? 749.98 : bp;
+      var m = parseFloat(el.getAttribute('data-strength'));
+      m = isNaN(m) ? 0.5 : m;
+      var go = el.getAttribute('data-grad-opacity');
+      go = go === null ? 0.6 : parseFloat(go);
+      var speed = parseFloat(el.getAttribute('data-grad-speed')) || 16;
+      var fixed = el.getAttribute('data-fixed') !== 'false';
+
+      injectStyle(speed);
+
+      var root = document.createElement('div');
+      root.style.cssText =
+        (fixed ? 'position:fixed;top:0;left:0;right:0;' : 'position:absolute;inset:0;') +
+        'z-index:50;pointer-events:none;overflow:hidden;';
+
+      var layerEls = [];
+      LAYERS.forEach(function (l) {
+        var mask = 'linear-gradient(to bottom,' + l[1] + ')';
+        var layer = document.createElement('div');
+        layer.style.cssText = 'position:absolute;inset:0;mask-image:' + mask + ';-webkit-mask-image:' + mask + ';';
+        root.appendChild(layer);
+        layerEls.push(layer);
+      });
+
+      var grad = document.createElement('div');
+      grad.className = 'pbs-grad';
+      grad.style.opacity = go;
+      var blobA = document.createElement('div'); blobA.className = 'pbs-blob pbs-a';
+      var blobB = document.createElement('div'); blobB.className = 'pbs-blob pbs-b';
+      grad.appendChild(blobA); grad.appendChild(blobB);
+      root.appendChild(grad);
+
+      el.appendChild(root);
+
+      function applyScale() {
+        // Pick the active baseline: mobile below the breakpoint, desktop otherwise.
+        var mobile  = window.innerWidth <= bp;
+        var baseW   = mobile ? mDesign : design;
+        var baseH   = mobile ? mH : H;
+        var s = window.innerWidth / baseW;
+        if (fixed) root.style.height = (baseH * s) + 'px';
+        layerEls.forEach(function (layer, i) {
+          var px = (LAYERS[i][0] * m * s) + 'px';
+          layer.style.backdropFilter = 'blur(' + px + ')';
+          layer.style.webkitBackdropFilter = 'blur(' + px + ')';
+        });
+        var bb = (BLOB_BLUR * s) + 'px';
+        blobA.style.filter = 'blur(' + bb + ')';
+        blobB.style.filter = 'blur(' + bb + ')';
+      }
+
+      applyScale();
+      var raf = 0;
+      window.addEventListener('resize', function () {
+        if (raf) return;
+        raf = requestAnimationFrame(function () { raf = 0; applyScale(); });
+      });
+    }
+  }
+
+  customElements.define('progressive-blur-strip', ProgressiveBlurStrip);
+})();
+</script>
+
+<!-- Set data-design-width to your Wix desktop canvas width; mobile baseline is 390px. -->
+<style>.pbs-grad{position:absolute;inset:0;overflow:hidden;-webkit-mask-image:linear-gradient(to bottom,#000 0%,#000 35%,transparent 100%);mask-image:linear-gradient(to bottom,#000 0%,#000 35%,transparent 100%);}.pbs-blob{position:absolute;top:50%;left:50%;width:150%;height:900%;border-radius:50%;will-change:transform;}.pbs-a{background:radial-gradient(circle,#FFE0B7 0%,rgba(255,224,183,.45) 35%,rgba(255,224,183,.12) 62%,rgba(255,224,183,0) 100%);animation:pbsA 16s ease-in-out infinite alternate;}.pbs-b{background:radial-gradient(circle,#DBFAC4 0%,rgba(219,250,196,.45) 35%,rgba(219,250,196,.12) 62%,rgba(219,250,196,0) 100%);animation:pbsB 21.6s ease-in-out infinite alternate;}@keyframes pbsA{0%{transform:translate(-95%,-60%) scale(1)}100%{transform:translate(15%,-40%) scale(1.25)}}@keyframes pbsB{0%{transform:translate(75%,-45%) scale(1.15)}100%{transform:translate(-35%,-55%) scale(.9)}}@media (prefers-reduced-motion: reduce){.pbs-a,.pbs-b{animation:none}}</style></head><body style="overscroll-behavior: none; touch-action: none;"><progressive-blur-strip data-design-width="1440" data-height="140" data-mobile-design-width="390" data-mobile-height="90" data-breakpoint="749.98" data-strength="0.5" data-grad-opacity="0.15" data-grad-speed="16"><div style="position: fixed; top: 0px; left: 0px; right: 0px; z-index: 50; pointer-events: none; overflow: hidden; height: 164.5px;"><div style="position: absolute; inset: 0px; mask-image: linear-gradient(rgb(0, 0, 0) 0%, rgb(0, 0, 0) 15%, transparent 36%); backdrop-filter: blur(12.925px);"></div><div style="position: absolute; inset: 0px; mask-image: linear-gradient(transparent 6%, rgb(0, 0, 0) 24%, rgb(0, 0, 0) 40%, transparent 58%); backdrop-filter: blur(7.05px);"></div><div style="position: absolute; inset: 0px; mask-image: linear-gradient(transparent 26%, rgb(0, 0, 0) 44%, rgb(0, 0, 0) 60%, transparent 78%); backdrop-filter: blur(3.525px);"></div><div style="position: absolute; inset: 0px; mask-image: linear-gradient(transparent 46%, rgb(0, 0, 0) 64%, rgb(0, 0, 0) 80%, transparent 94%); backdrop-filter: blur(1.7625px);"></div><div style="position: absolute; inset: 0px; mask-image: linear-gradient(transparent 66%, rgb(0, 0, 0) 84%, rgb(0, 0, 0) 100%); backdrop-filter: blur(0.88125px);"></div><div class="pbs-grad" style="opacity: 0.15;"><div class="pbs-blob pbs-a" style="filter: blur(94px);"></div><div class="pbs-blob pbs-b" style="filter: blur(94px);"></div></div></div></progressive-blur-strip>
+<!-- ============================================================
+     SCROLL PASS-THROUGH — for Lenis smooth scroll.
+     This embed doesn't scroll itself, so it would otherwise swallow
+     wheel/touch gestures over it and glitch the page's Lenis scroll.
+     Forward the gestures up and kill native scroll-chaining so Lenis
+     is the only thing driving the page. (This overlay is pointer-events:none,
+     so there's nothing interactive to lose.)
+     ============================================================ -->
+<script>
+(function () {
+  if (window.parent === window) return; // not embedded — nothing to forward
+  var s = document.documentElement.style, b = document.body.style;
+  s.overscrollBehavior = b.overscrollBehavior = 'none';
+  s.touchAction = b.touchAction = 'none';
+  window.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    window.parent.postMessage({ type: 'sx-wheel', deltaY: e.deltaY, deltaX: e.deltaX }, '*');
+  }, { passive: false });
+  var touchY = null, touchX = null;
+  window.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 1) { touchY = e.touches[0].clientY; touchX = e.touches[0].clientX; }
+  }, { passive: true });
+  window.addEventListener('touchmove', function (e) {
+    if (touchY === null || e.touches.length !== 1) return;
+    e.preventDefault();
+    var y = e.touches[0].clientY, x = e.touches[0].clientX;
+    window.parent.postMessage({ type: 'sx-wheel', deltaY: touchY - y, deltaX: touchX - x }, '*');
+    touchY = y; touchX = x;
+  }, { passive: false });
+  window.addEventListener('touchend', function () { touchY = touchX = null; }, { passive: true });
+})();
+</script></body></html>

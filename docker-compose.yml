@@ -1,0 +1,122 @@
+# Additive packaging layer — a second, independent way to run this project.
+# The manual .venv + manage.py runserver + npm run dev workflow is untouched
+# and keeps working exactly as before. See docs/docker-packaging-spec.md.
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose up --build
+# Then open http://localhost:8080 (or FRONTEND_HOST_PORT if overridden).
+
+services:
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-billing_engine}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      # Postgres 18's image expects the volume at /var/lib/postgresql (data
+      # lives in a versioned subdirectory beneath it) — the pre-18 convention
+      # of mounting directly at /var/lib/postgresql/data is now rejected by
+      # the image at startup. See docker-library/postgres#1259.
+      - postgres_data:/var/lib/postgresql
+    ports:
+      # Host port avoids colliding with a locally-installed Postgres on the
+      # default 5432.
+      - "${DB_HOST_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-billing_engine}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    # Celery broker for the background jobs (Stage D7). Internal only — no host
+    # port. Healthcheck mirrors the db service's pattern.
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      # Override the manual workflow's localhost/dev values from .env with
+      # the container-correct ones — env_file above supplies everything
+      # else (DJANGO_SECRET_KEY, POSTGRES_PASSWORD, etc.) unchanged.
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "false"
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      CELERY_BROKER_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      # Host port avoids colliding with a manually-run `manage.py runserver`
+      # on the default 8000.
+      - "${BACKEND_HOST_PORT:-8001}:8000"
+
+  worker:
+    # Celery worker — executes the background tasks. Same image and env as
+    # backend; `entrypoint:` replaces the migrate/gunicorn script (backend
+    # already runs migrations, and the first scheduled task fires minutes after
+    # startup, well after that finishes).
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "false"
+      CELERY_BROKER_URL: redis://redis:6379/0
+    entrypoint: ["celery", "-A", "config", "worker", "--loglevel=info"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    # Celery beat — the scheduler that enqueues the periodic tasks
+    # (webhook sweep every 5 min, usage snapshot daily). Schedule lives in
+    # config/celery.py.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      DJANGO_DEBUG: "false"
+      CELERY_BROKER_URL: redis://redis:6379/0
+    entrypoint: ["celery", "-A", "config", "beat", "--loglevel=info"]
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      # Host port avoids colliding with the Vite dev server's default 5173.
+      - "${FRONTEND_HOST_PORT:-8080}:80"
+
+volumes:
+  postgres_data:

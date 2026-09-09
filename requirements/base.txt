@@ -1,0 +1,30 @@
+Django>=5.0,<5.1
+djangorestframework>=3.15,<3.16
+djangorestframework-simplejwt>=5.3,<5.4
+psycopg2-binary>=2.9,<3.0
+python-dotenv>=1.0,<2.0
+# Serves the app inside the Docker image — manage.py runserver stays the dev
+# server for the manual workflow, unchanged. Not used outside containers.
+gunicorn>=23.0,<24.0
+# Verifies a Google-issued ID token's signature against Google's public keys —
+# the one thing this needs. Deliberately not django-allauth/dj-rest-auth (see
+# docs/google-signin-spec.md §1): those bring their own account app and their
+# own email-verification system, which would compete with the
+# EmailVerificationToken system already built in this project.
+google-auth>=2.35,<3.0
+# google.auth.transport.requests (used to fetch Google's public certs during
+# verification) hard-requires this — not bundled with google-auth itself.
+requests>=2.32,<3.0
+# Razorpay SDK — Stage D1 onward (docs/stage-d1-spec.md). Used for creating
+# Razorpay-side Plans (client.plan.create). Webhook signature verification is
+# deliberately hand-rolled with hmac (see apps/billing/services.py), not routed
+# through the SDK helper, so the security-critical check stays auditable in-repo.
+razorpay>=2.0,<3.0
+# Background jobs — Stage D7 (docs/stage-d7-spec.md). Celery schedules the
+# webhook retry sweep and periodic usage snapshots; the tasks are thin callers
+# of the same service methods the management commands use. The automated test
+# suite runs tasks in-process (CELERY_TASK_ALWAYS_EAGER), so it never needs a
+# broker — only real local dev / Docker does.
+celery>=5.4,<6.0
+# The Python client Celery's Redis broker transport needs (redis:// URLs).
+redis>=5.0,<6.0
