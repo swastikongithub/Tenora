@@ -35,6 +35,7 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
       '/api/platform/webhook-events/',
       '/api/platform/webhook-events/detail/',
       '/api/platform/webhook-events/process-pending/',
+      '/api/platform/webhook-events/raw/',
       '/api/tenants/',
       '/api/tenants/me/',
       '/api/users/me/',

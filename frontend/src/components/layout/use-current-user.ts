@@ -24,6 +24,12 @@ interface CurrentUser {
   email: string
   /** Platform-staff flag — gates the platform-admin dashboard (spec §4.4). */
   is_staff: boolean
+  /**
+   * Platform-superuser flag. With `is_staff`, this is the Root tier
+   * (docs/operator-control-plane-spec.md §E) — the two together, never
+   * `is_superuser` alone.
+   */
+  is_superuser: boolean
 }
 
 export interface CurrentUserState {
@@ -37,6 +43,15 @@ export interface CurrentUserState {
    * boundary is `IsPlatformStaff` server-side, never this flag.
    */
   isStaff: boolean
+  /**
+   * Whether the signed-in user is a Root operator: `is_staff AND
+   * is_superuser`, the same predicate IsPlatformRoot checks server-side.
+   * Defaults to `false` until `/users/me/` resolves and on error — the safe
+   * default, since the real boundary is IsPlatformRoot, never this flag.
+   * Used only to decide whether Root-only controls RENDER; every one of them
+   * is refused server-side for a non-Root caller regardless.
+   */
+  isRoot: boolean
   /**
    * Whether `is_staff` is still unknown because `/users/me/` hasn't settled.
    * Deliberately NOT `resolving`: that field has an `AuthProvider.userEmail`
@@ -62,6 +77,7 @@ export function useCurrentUser(): CurrentUserState {
     email,
     resolving,
     isStaff: data?.is_staff ?? false,
+    isRoot: Boolean(data?.is_staff && data?.is_superuser),
     isStaffResolving: isPending && !isError,
   }
 }

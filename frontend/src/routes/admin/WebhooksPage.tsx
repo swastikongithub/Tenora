@@ -4,6 +4,10 @@
  * webhook retry Fallback Sweep Control (docs/operator-control-plane-spec.md
  * §B) — a manual trigger for WebhookProcessingService.process_pending(),
  * used because no production worker is deployed.
+ *
+ * Phase 4 adds the Root-only raw-payload action per row. The list itself is
+ * unchanged and still carries no payload: the raw read is a separate,
+ * separately-gated request, made only when a Root operator asks for one.
  */
 
 import { useState } from 'react'
@@ -11,10 +15,12 @@ import { useQuery } from '@tanstack/react-query'
 
 import { Alert, Badge, Button, Skeleton, Table } from '../../components'
 import type { Column } from '../../components'
+import { useCurrentUser } from '../../components/layout/use-current-user'
 import { apiClient } from '../../lib/api-client'
 import { formatDate } from '../../lib/format'
 import { queryKeys } from '../../lib/query-keys'
 import { FallbackSweepControl } from './FallbackSweepControl'
+import { RawPayloadModal } from './RawPayloadModal'
 import { toSearchParams } from './query-params'
 
 type EventType = 'ACTIVATED' | 'CHARGED' | 'CANCELLED' | 'PAYMENT_TROUBLE' | 'UNKNOWN'
@@ -44,7 +50,7 @@ const EVENT_TYPES: EventType[] = [
   'UNKNOWN',
 ]
 
-const columns: Array<Column<WebhookEventRow>> = [
+const baseColumns: Array<Column<WebhookEventRow>> = [
   {
     key: 'tenant',
     header: 'Tenant',
@@ -69,8 +75,10 @@ const columns: Array<Column<WebhookEventRow>> = [
 ]
 
 export function WebhooksPage() {
+  const { isRoot } = useCurrentUser()
   const [eventType, setEventType] = useState<'' | EventType>('')
   const [processed, setProcessed] = useState<'' | 'true' | 'false'>('')
+  const [rawEventId, setRawEventId] = useState<string | null>(null)
 
   const params = {
     event_type: eventType || undefined,
@@ -83,6 +91,28 @@ export function WebhooksPage() {
         `/platform/webhook-events/${toSearchParams(params)}`,
       ),
   })
+
+  // Root-only, and presentation only: GET /platform/webhook-events/raw/ is
+  // gated by IsPlatformRoot server-side and answers 403 to a Staff caller
+  // whatever renders here.
+  const columns: Array<Column<WebhookEventRow>> = isRoot
+    ? [
+        ...baseColumns,
+        {
+          key: 'raw',
+          header: 'Raw payload',
+          render: (e) => (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setRawEventId(e.id)}
+            >
+              View raw
+            </Button>
+          ),
+        },
+      ]
+    : baseColumns
 
   return (
     <div>
@@ -170,6 +200,12 @@ export function WebhooksPage() {
           <p className="text-body text-secondary">No webhook events match these filters.</p>
         )}
       </div>
+
+      <RawPayloadModal
+        open={rawEventId !== null}
+        eventId={rawEventId}
+        onClose={() => setRawEventId(null)}
+      />
     </div>
   )
 }

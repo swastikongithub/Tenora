@@ -670,3 +670,64 @@ export const platformPlanSyncErrorHandler = (status = 502) =>
       { status },
     ),
   )
+
+
+// --- Operator Control Plane, Phase 4 (Root tier) ---
+
+/** `GET /api/users/me/` returning a Root identity: staff AND superuser. */
+export const usersMeRootHandler = (
+  user: { id: string; email: string } = {
+    id: 'root-1',
+    email: 'root@example.com',
+  },
+) =>
+  http.get(apiUrl('/users/me/'), () =>
+    HttpResponse.json({ ...user, is_staff: true, is_superuser: true }),
+  )
+
+/** `PATCH /api/platform/users/detail/?id=` — echoes back the updated user. */
+export const platformUserRolePatchHandler = (
+  user: PlatformUserRow = { ...PLATFORM_USERS[0], is_superuser: true },
+) => http.patch(apiUrl('/platform/users/detail/'), () => HttpResponse.json(user))
+
+export const platformUserRolePatchErrorHandler = (
+  detail = 'This change would leave no active root operator. Promote another root account first.',
+  status = 400,
+) =>
+  http.patch(apiUrl('/platform/users/detail/'), () =>
+    HttpResponse.json({ detail }, { status }),
+  )
+
+/**
+ * A provider payload shaped like a real one — it carries customer contact and
+ * card metadata, which is the whole reason the raw read is Root-gated.
+ */
+export const RAW_WEBHOOK_PAYLOAD = {
+  event: 'subscription.charged',
+  payload: {
+    payment: {
+      entity: {
+        id: 'pay_1',
+        email: 'customer@example.com',
+        card: { last4: '4242' },
+      },
+    },
+  },
+}
+
+/** `GET /api/platform/webhook-events/raw/?id=` — Root-only diagnostic read. */
+export const platformWebhookRawHandler = (
+  event: PlatformWebhookEventRow = PLATFORM_WEBHOOK_EVENTS[0],
+  rawPayload: unknown = RAW_WEBHOOK_PAYLOAD,
+) =>
+  http.get(apiUrl('/platform/webhook-events/raw/'), () =>
+    HttpResponse.json({ ...event, raw_payload: rawPayload }),
+  )
+
+export const platformWebhookRawErrorHandler = (status = 403) =>
+  http.get(apiUrl('/platform/webhook-events/raw/'), () =>
+    HttpResponse.json(
+      { detail: 'This action is restricted to root operators.' },
+      { status },
+    ),
+  )

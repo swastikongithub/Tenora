@@ -188,14 +188,18 @@ class GoogleSignInView(APIView):
 
 class MeView(APIView):
     """
-    GET /api/users/me/ — { id, email, is_staff } for the requesting user.
+    GET /api/users/me/ — { id, email, is_staff, is_superuser } for the
+    requesting user.
 
     Global path (see GLOBAL_PATHS): identity, not tenant-scoped data, so
     it must not require X-Tenant-ID. The tenant list the frontend also
     needs on load lives at /api/tenants/me/, deliberately kept separate.
-    `is_staff` (added via MeSerializer, not the shared UserSerializer) is
-    what lets the frontend decide whether to show the platform-admin
-    dashboard — docs/platform-admin-spec.md §4.4.
+    `is_staff` / `is_superuser` (added via MeSerializer, not the shared
+    UserSerializer) are what let the frontend decide whether to show the
+    platform-admin dashboard at all, and whether to render its Root-only
+    controls — docs/platform-admin-spec.md §4.4 and
+    docs/operator-control-plane-spec.md §D. UX signals only: the real
+    boundaries are IsPlatformStaff / IsPlatformRoot server-side.
     """
 
     permission_classes = [IsAuthenticated]

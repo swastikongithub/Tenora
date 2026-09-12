@@ -81,6 +81,15 @@ export const queryKeys = {
    */
   platformAuditLog: (params: Record<string, string | undefined> = {}) =>
     ['global', 'platform', 'audit-log', params] as const,
+
+  /**
+   * Operator Control Plane, Phase 4 — the Root-only raw gateway payload read.
+   * Keyed separately from `platformWebhookEventDetail` on purpose: it is a
+   * different endpoint with a different audience, and collapsing the two keys
+   * would let a sanitized detail response and a raw one share a cache entry.
+   */
+  platformWebhookEventRaw: (id: string) =>
+    ['global', 'platform', 'webhook-events', 'raw', id] as const,
 } as const
 
 /** The prefix every tenant-scoped key starts with — used by tests and tooling. */

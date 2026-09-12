@@ -8,8 +8,10 @@ cross-tenant data in a single response. Every query here runs against the
 default manager and never calls `.for_tenant()` / reads `request.tenant` —
 that is the whole point, and it is stated at each query site, not only in
 the spec. Every view here is gated by IsPlatformStaff (a logged-in ordinary
-user must get 403, not 200) — Phase 2 introduces no Root-gated view; that
-tier is Phase 4.
+user must get 403, not 200). Phase 4 adds the first Root-gated surfaces —
+the user role PATCH and the raw gateway payload read — which use
+IsPlatformRoot instead of, never alongside, IsPlatformStaff (Root implies
+Staff).
 
 Detail/action lookups are `?id=` query-parameter based on a STATIC path
 (`.../detail/`), not a `<uuid:pk>` path segment — apps.tenants.authentication
@@ -66,7 +68,7 @@ from apps.billing.services import (
 )
 from apps.platform.models import AuditEvent
 from apps.platform.pagination import PlatformPageNumberPagination
-from apps.platform.permissions import IsPlatformStaff
+from apps.platform.permissions import IsPlatformRoot, IsPlatformStaff
 from apps.platform.serializers import (
     PlatformAuditEventSerializer,
     PlatformPlanCreateSerializer,
@@ -75,13 +77,17 @@ from apps.platform.serializers import (
     PlatformReconciliationDiscrepancySerializer,
     PlatformTenantSerializer,
     PlatformUserDetailSerializer,
+    PlatformUserRoleUpdateSerializer,
     PlatformUserSerializer,
+    PlatformWebhookEventRawSerializer,
     PlatformWebhookEventSerializer,
 )
 from apps.platform.services import (
     AuditService,
+    LastRootProtected,
     PlanLocked,
     PlanManagementService,
+    UserRoleService,
     resolve_tenants_for_external_subscription_ids,
 )
 from apps.platform.utils import parse_uuid_or_none
@@ -701,20 +707,42 @@ class PlatformUserListView(APIView):
 
 
 class PlatformUserDetailView(APIView):
-    """GET /api/platform/users/detail/?id=<uuid> — one user, plus which
-    tenants they belong to and with what role (the flattened
+    """
+    GET /api/platform/users/detail/?id=<uuid> — Staff-tier: one user, plus
+    which tenants they belong to and with what role (the flattened
     {**TenantSerializer(tenant).data, "role": ...} shape MyTenantsView
-    already uses for the mirror-image "tenants I belong to" query)."""
+    already uses for the mirror-image "tenants I belong to" query).
 
-    permission_classes = [IsAuthenticated, IsPlatformStaff]
+    PATCH /api/platform/users/detail/?id=<uuid> — Phase 4, ROOT-tier ONLY
+    (docs/operator-control-plane-spec.md §C): change a user's platform roles.
+    The read and the write sit on one path with two tiers, so `get_permissions`
+    resolves the tier per method rather than one class-level list — the
+    alternative, a second URL for the write, would put "who may read a user"
+    and "who may change one" in two places that could drift.
 
-    def get(self, request):
+    The mutation is UserRoleService.update_roles, which owns its transaction,
+    its critical audit row, and the last-root invariant. This view adds no
+    guard of its own: a second copy of that rule here is exactly how the two
+    would eventually disagree.
+    """
+
+    def get_permissions(self):
+        if self.request.method == "PATCH":
+            return [IsAuthenticated(), IsPlatformRoot()]
+        return [IsAuthenticated(), IsPlatformStaff()]
+
+    def _get_user(self, request):
         user_id = parse_uuid_or_none(request.query_params.get("id"))
         if user_id is None:
-            return Response(status=status.HTTP_404_NOT_FOUND)
+            return None
         try:
-            user = User.objects.get(pk=user_id)
+            return User.objects.get(pk=user_id)
         except User.DoesNotExist:
+            return None
+
+    def get(self, request):
+        user = self._get_user(request)
+        if user is None:
             return Response(status=status.HTTP_404_NOT_FOUND)
 
         memberships = [
@@ -724,6 +752,81 @@ class PlatformUserDetailView(APIView):
         return Response(
             PlatformUserDetailSerializer(
                 user, context={"memberships": memberships}
+            ).data,
+            status=status.HTTP_200_OK,
+        )
+
+    def patch(self, request):
+        user = self._get_user(request)
+        if user is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = PlatformUserRoleUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            user = UserRoleService.update_roles(
+                actor=request.user,
+                user=user,
+                changes=dict(serializer.validated_data),
+            )
+        except LastRootProtected as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        return Response(PlatformUserSerializer(user).data, status=status.HTTP_200_OK)
+
+
+class PlatformWebhookEventRawView(APIView):
+    """
+    GET /api/platform/webhook-events/raw/?id=<uuid> — Phase 4, ROOT-tier ONLY
+    (docs/operator-control-plane-spec.md §B "Webhook management — normalized
+    surface, isolated raw diagnostic"): the normalized fields plus the
+    provider's raw payload.
+
+    This is the one surface in the whole control plane that returns provider
+    data verbatim, which is exactly why it is a separate path with its own
+    narrower gate rather than a `?include_raw=1` flag on the Staff-tier detail
+    read — a query parameter that widens a response's audience is the kind of
+    thing that gets copied into a URL and forgotten.
+
+    A read, so the audit is observational (spec's own categorisation:
+    "webhook raw payload viewed"). Best-effort by contract: a failed audit
+    write must not deny a Root operator the diagnostic they came for, and the
+    request itself changed nothing that the row would be the only record of.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformRoot]
+
+    def get(self, request):
+        event_id = parse_uuid_or_none(request.query_params.get("id"))
+        if event_id is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            event = WebhookEvent.objects.get(pk=event_id)
+        except WebhookEvent.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        tenant_map = resolve_tenants_for_external_subscription_ids(
+            [event.external_subscription_id]
+        )
+        AuditService.record_observational(
+            actor=request.user,
+            action="webhook.raw_payload_viewed",
+            target_type="WebhookEvent",
+            target_id=event.id,
+            summary=f"Viewed raw gateway payload for event {event.external_event_id}",
+            # The delivery id and event type only — never any part of the
+            # payload itself, which is the entire thing this row exists to
+            # record the VIEWING of.
+            metadata={
+                "external_event_id": event.external_event_id,
+                "event_type": event.event_type,
+            },
+        )
+        return Response(
+            PlatformWebhookEventRawSerializer(
+                event, context={"tenant_map": tenant_map}
             ).data,
             status=status.HTTP_200_OK,
         )

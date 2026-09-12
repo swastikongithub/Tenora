@@ -55,6 +55,10 @@ export const GLOBAL_PATHS: ReadonlySet<string> = new Set([
   // PATCH on '/api/platform/plans/detail/', both already listed above, so
   // the gateway sync action is the only new entry.
   '/api/platform/plans/sync/',
+  // Operator Control Plane, Phase 4 (docs/operator-control-plane-spec.md) —
+  // Root tier. Role management is a PATCH on '/api/platform/users/detail/',
+  // already listed above, so this is the only new entry.
+  '/api/platform/webhook-events/raw/',
 ])
 
 /**

@@ -327,3 +327,56 @@ class PlatformPlanUpdateSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError("Provide at least one field to change.")
         return attrs
+
+
+# --- Operator Control Plane, Phase 4 (Root tier) ---
+
+
+class PlatformWebhookEventRawSerializer(PlatformWebhookEventSerializer):
+    """
+    Output only — GET /api/platform/webhook-events/raw/?id=, Root-tier ONLY
+    (docs/operator-control-plane-spec.md §B "Webhook management"): the same
+    normalized fields every Staff reader sees, plus the provider's raw payload.
+
+    A subclass rather than a second flat serializer, so the two can never
+    drift: whatever the sanitized read exposes, this exposes, and the ONE extra
+    field is visible right here. There is no path by which `raw_payload`
+    appears on the base class — the list and detail reads keep using it
+    unchanged.
+
+    `raw_payload` is returned verbatim, with no redaction pass. Redacting it
+    would be a lie about what is stored: this action exists precisely so a Root
+    operator can see exactly what the gateway sent when diagnosing a failure. A
+    gateway secret is never IN a payload (it is the key the signature is
+    verified with, and lives only in settings) — what a payload can carry is
+    customer contact and payment-instrument metadata, which is why this is
+    Root-gated and its use is logged.
+    """
+
+    class Meta(PlatformWebhookEventSerializer.Meta):
+        fields = PlatformWebhookEventSerializer.Meta.fields + ["raw_payload"]
+
+
+class PlatformUserRoleUpdateSerializer(serializers.Serializer):
+    """
+    Input only — PATCH /api/platform/users/detail/?id=, Root-tier
+    (docs/operator-control-plane-spec.md §C).
+
+    Exactly three fields, and a plain `Serializer` so nothing else in the body
+    can ever bind: this endpoint changes platform authority, not identity.
+    `email`, `password` and `email_verified` are deliberately absent — an
+    operator surface that could change an account's email could take the
+    account over, and `email_verified` has exactly one legitimate writer
+    (EmailVerificationService), which is not this.
+
+    An empty body is rejected rather than silently accepted as a no-op.
+    """
+
+    is_staff = serializers.BooleanField(required=False)
+    is_superuser = serializers.BooleanField(required=False)
+    is_active = serializers.BooleanField(required=False)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide at least one field to change.")
+        return attrs

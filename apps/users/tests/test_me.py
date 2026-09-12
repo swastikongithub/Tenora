@@ -34,9 +34,12 @@ class MeTests(APITestCase):
 
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         # `is_staff` was added (MeSerializer) so the frontend can gate the
-        # platform-admin dashboard — docs/platform-admin-spec.md §4.4. It is
-        # on this endpoint only; RegisterView's {id, email} shape is unchanged.
-        self.assertEqual(set(resp.data), {"id", "email", "is_staff"})
+        # platform-admin dashboard — docs/platform-admin-spec.md §4.4;
+        # `is_superuser` joined it in Operator Control Plane Phase 4 so the
+        # Root-only operator controls don't render for a Staff-tier viewer
+        # (docs/operator-control-plane-spec.md §D). Both are on this endpoint
+        # only; RegisterView's {id, email} shape is unchanged.
+        self.assertEqual(set(resp.data), {"id", "email", "is_staff", "is_superuser"})
         self.assertEqual(resp.data["email"], "me@example.com")
         self.assertEqual(str(resp.data["id"]), str(self.user.id))
 
@@ -51,6 +54,24 @@ class MeTests(APITestCase):
         )
         self._auth(staff)
         self.assertIs(self.client.get(ME_URL).data["is_staff"], True)
+
+    def test_is_superuser_reflects_the_user(self):
+        # A normal account: False.
+        self._auth(self.user)
+        self.assertIs(self.client.get(ME_URL).data["is_superuser"], False)
+
+        # A root account: True. Both flags, which is exactly the predicate
+        # IsPlatformRoot checks server-side.
+        root = User.objects.create_user(
+            email="root@example.com",
+            password=GOOD_PASSWORD,
+            is_staff=True,
+            is_superuser=True,
+        )
+        self._auth(root)
+        body = self.client.get(ME_URL).data
+        self.assertIs(body["is_staff"], True)
+        self.assertIs(body["is_superuser"], True)
 
     def test_returns_the_requesting_user_not_some_other(self):
         other = User.objects.create_user(

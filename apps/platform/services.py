@@ -4,7 +4,8 @@ Platform-admin services — docs/operator-control-plane-spec.md §B.
 Phase 1 additions here are read-time helpers only. Phase 2 adds AuditService
 — the two explicit write paths every operator mutation records through.
 Phase 3 adds PlanManagementService, the one genuinely new domain capability
-in this design (spec §B reuse table).
+in this design (spec §B reuse table). Phase 4 adds UserRoleService — the one
+place "who has power" ever changes, guarded by the last-root invariant.
 """
 
 import logging
@@ -15,6 +16,8 @@ from django.db import transaction
 from apps.billing.models import Plan, Subscription, SubscriptionCheckout
 from apps.billing.services import PlanSyncService
 from apps.platform.models import AuditEvent
+from apps.platform.permissions import ROOT_Q
+from apps.users.models import User
 
 logger = logging.getLogger(__name__)
 
@@ -338,3 +341,124 @@ class PlanManagementService:
                 "payment_gateway": getattr(settings, "PAYMENT_GATEWAY", ""),
             },
         )
+
+
+class LastRootProtected(Exception):
+    """
+    A role mutation was refused because applying it would leave the platform
+    with zero active Root operators — docs/operator-control-plane-spec.md §E
+    "Self-lockout / last-root invariant".
+
+    One exception for both named failure modes (an actor demoting themselves,
+    and an actor demoting the last other Root), because they are one rule: the
+    system may never reach zero, and it does not matter whose account the
+    change lands on.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "This change would leave no active root operator. Promote another "
+            "root account first."
+        )
+
+
+class UserRoleService:
+    """
+    Phase 4 — docs/operator-control-plane-spec.md §B/§E: the single endpoint
+    through which "who has power" ever changes, and the most leverage-dense
+    service in this design.
+
+    Only the three platform flags are reachable from here: `is_staff`,
+    `is_superuser`, `is_active`. Nothing about identity — no email change, no
+    password reset, no verification override — because none of that is part of
+    the approved architecture and an operator surface that could take over an
+    account by changing its email would be a far larger grant than "manage the
+    operator roster".
+
+    `is_active` here keeps its own meaning (administratively disabled), never
+    `email_verified`'s — CLAUDE.md: those are distinct concepts and this
+    service touches only the first.
+
+    Concurrency: the invariant is checked INSIDE the transaction, after taking
+    a row lock on every current Root. Without that lock two simultaneous
+    demotions of two different Root accounts would each see the other still
+    qualifying and both commit, leaving zero — the classic check-then-act race.
+    The lock serializes every role mutation against the current Root set, which
+    is the smallest thing that makes the guard actually true rather than
+    usually true.
+    """
+
+    #: The only fields this service will ever write.
+    MUTABLE_FIELDS = ("is_staff", "is_superuser", "is_active")
+
+    @staticmethod
+    @transaction.atomic
+    def update_roles(*, actor, user, changes):
+        """
+        Apply `changes` (a validated subset of MUTABLE_FIELDS) to `user`,
+        atomically with its critical audit row.
+
+        Raises `LastRootProtected` if the result would leave zero active Root
+        operators — nothing is written in that case. A no-op change writes and
+        records nothing, the same rule PlanManagementService.update_plan uses.
+        """
+        # Lock the current Root set for the rest of this transaction. Ordered
+        # by pk so two concurrent mutations take the rows in the same order
+        # and deadlock on each other rather than interleaving.
+        locked_root_ids = set(
+            User.objects.select_for_update()
+            .filter(ROOT_Q)
+            .order_by("pk")
+            .values_list("pk", flat=True)
+        )
+        # Re-read the target inside the lock: its flags may have changed since
+        # the view fetched it.
+        user = User.objects.select_for_update().get(pk=user.pk)
+
+        before = {field: getattr(user, field) for field in changes}
+        applied = {f: v for f, v in changes.items() if before[f] != v}
+        if not applied:
+            return user
+
+        resulting = {field: getattr(user, field) for field in UserRoleService.MUTABLE_FIELDS}
+        resulting.update(applied)
+        would_be_root = all(resulting[f] for f in ("is_staff", "is_superuser", "is_active"))
+
+        other_roots = locked_root_ids - {user.pk}
+        if not other_roots and not would_be_root:
+            raise LastRootProtected()
+
+        for field, value in applied.items():
+            setattr(user, field, value)
+        user.save(update_fields=sorted(applied))
+
+        AuditService.record_critical(
+            actor=actor,
+            action="user.roles_changed",
+            target_type="User",
+            target_id=user.id,
+            summary=(
+                f"Changed platform roles for {user.email}: "
+                + ", ".join(
+                    f"{field} {before[field]} -> {applied[field]}"
+                    for field in sorted(applied)
+                )
+            ),
+            # The target's email identifies the account in the log; no
+            # password, no token, no session data — none of which this service
+            # reads in the first place.
+            metadata={
+                "email": user.email,
+                "changed": sorted(applied),
+                "before": {f: before[f] for f in applied},
+                "after": dict(applied),
+                "self_change": str(actor.pk) == str(user.pk),
+            },
+        )
+        return user
+
+    @staticmethod
+    def active_root_count():
+        """How many accounts currently satisfy the Root predicate. A read, for
+        the operator UI to show why a demotion would be refused."""
+        return User.objects.filter(ROOT_Q).count()

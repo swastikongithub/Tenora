@@ -17,18 +17,24 @@ class MeSerializer(UserSerializer):
     """
     GET /api/users/me/ only. Adds `is_staff` so the frontend can decide
     whether to show the platform-admin dashboard at all
-    (docs/platform-admin-spec.md §4.4).
+    (docs/platform-admin-spec.md §4.4), and — since Operator Control Plane
+    Phase 4 — `is_superuser`, for the same reason one tier down: the Root-only
+    operator controls must not render for a Staff-tier viewer
+    (docs/operator-control-plane-spec.md §D).
 
-    Deliberately a MeView-scoped subclass, NOT a field added to
+    Both are UX signals only. The real boundaries are IsPlatformStaff and
+    IsPlatformRoot server-side, which answer the same question from the
+    database on every request regardless of what the client believes.
+
+    Deliberately a MeView-scoped subclass, NOT fields added to
     UserSerializer: RegisterView shares that base serializer and its
     response shape (and the test pinning it) stays exactly {id, email} —
-    a fresh signup has no business being told its own is_staff flag.
-    `is_staff` is the same platform-tooling concept Django admin already
-    gates on; this is not a new field.
+    a fresh signup has no business being told its own platform flags.
+    Neither flag is a new concept: both already gate Django admin.
     """
 
     class Meta(UserSerializer.Meta):
-        fields = UserSerializer.Meta.fields + ["is_staff"]
+        fields = UserSerializer.Meta.fields + ["is_staff", "is_superuser"]
 
 
 class RegisterSerializer(serializers.Serializer):

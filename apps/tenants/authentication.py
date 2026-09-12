@@ -63,6 +63,13 @@ GLOBAL_PATHS = frozenset({
     # above (POST on the list path, PATCH on the detail path), so the gateway
     # sync action is the only new literal path this phase adds.
     "/api/platform/plans/sync/",
+    # Operator Control Plane, Phase 4 (docs/operator-control-plane-spec.md) —
+    # Root tier. Role management is a PATCH on "/api/platform/users/detail/",
+    # already listed above, so the raw gateway payload read is the only new
+    # literal path. Being listed here exempts it from tenant resolution
+    # exactly like its siblings; its own narrower gate is IsPlatformRoot on
+    # the view.
+    "/api/platform/webhook-events/raw/",
 })
 
 

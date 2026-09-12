@@ -40,6 +40,7 @@ from apps.platform.views import (
     PlatformUserListView,
     PlatformWebhookEventDetailView,
     PlatformWebhookEventListView,
+    PlatformWebhookEventRawView,
     PlatformWebhookProcessPendingView,
 )
 from apps.tenants.views import (
@@ -165,6 +166,18 @@ urlpatterns = [
         "api/platform/audit-log/",
         PlatformAuditLogListView.as_view(),
         name="platform_audit_log",
+    ),
+    # --- Operator Control Plane, Phase 4 (docs/operator-control-plane-spec.md) ---
+    # Root tier. User role management is PATCH on the existing user detail
+    # path (one path, two tiers — see PlatformUserDetailView), so the raw
+    # gateway payload read is the only new literal path this phase adds. It is
+    # deliberately its own path rather than a flag on the sanitized detail
+    # read: a query parameter that widens a response's audience is too easy to
+    # copy into a URL and forget.
+    path(
+        "api/platform/webhook-events/raw/",
+        PlatformWebhookEventRawView.as_view(),
+        name="platform_webhook_event_raw",
     ),
     # --- tenant-scoped (X-Tenant-ID resolved by TenantJWTAuthentication) ---
     path(
