@@ -11,6 +11,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,6 +24,23 @@ SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-not-for-production")
 DEBUG = os.environ.get("DJANGO_DEBUG", "true").lower() == "true"
 ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
+# Frontend and API are deployed as separate origins (e.g. two Render
+# services), so the API must explicitly allow cross-origin requests from the
+# frontend's origin. Environment-driven, comma-separated, no wildcard —
+# an empty/unset value means no origin is allowed, not "allow everything".
+# Auth is Bearer-token based (Authorization header), not cookies, so
+# CORS_ALLOW_CREDENTIALS is deliberately left at its default (False).
+CORS_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if origin.strip()
+]
+# django-cors-headers' default allow-list doesn't include X-Tenant-ID (it's
+# not a standard header) — without adding it here, the browser's preflight
+# would block every tenant-scoped cross-origin request even though
+# CORS_ALLOWED_ORIGINS permits the origin itself.
+CORS_ALLOW_HEADERS = [*default_headers, "x-tenant-id"]
+
 INSTALLED_APPS = [
     "django.contrib.admin",
     "django.contrib.auth",
@@ -30,6 +48,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "rest_framework",
     "rest_framework_simplejwt",
     # Required because SIMPLE_JWT["BLACKLIST_AFTER_ROTATION"] is True —
@@ -45,6 +64,10 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    # Must come before CommonMiddleware (django-cors-headers requirement) so
+    # CORS response headers get added, and preflight OPTIONS requests get
+    # short-circuited, ahead of Django's own request handling.
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
