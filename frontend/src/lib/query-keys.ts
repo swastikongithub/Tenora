@@ -43,8 +43,35 @@ export const queryKeys = {
    * NOT tenant-scoped (that is the whole point), so a tenant switch must not
    * drop it, exactly like `plans()` / `tenantsMe()`.
    */
-  platformTenants: () => ['global', 'platform', 'tenants'] as const,
+  platformTenants: (params: Record<string, string | undefined> = {}) =>
+    ['global', 'platform', 'tenants', params] as const,
   platformStats: () => ['global', 'platform', 'stats'] as const,
+
+  /**
+   * Operator Control Plane, Phase 1 (docs/operator-control-plane-spec.md) —
+   * every one of these is cross-tenant ('global'), never per-tenant, same as
+   * the two above. Filter/pagination params are part of the key itself so a
+   * filter change is a cache-key change (an automatic refetch), not
+   * something a component has to invalidate by hand.
+   */
+  platformHealth: () => ['global', 'platform', 'health'] as const,
+  platformPlans: (params: Record<string, string | undefined> = {}) =>
+    ['global', 'platform', 'plans', params] as const,
+  platformPlanDetail: (id: string) =>
+    ['global', 'platform', 'plans', 'detail', id] as const,
+  platformTenantDetail: (id: string) =>
+    ['global', 'platform', 'tenants', 'detail', id] as const,
+  platformWebhookEvents: (params: Record<string, string | undefined> = {}) =>
+    ['global', 'platform', 'webhook-events', params] as const,
+  platformWebhookEventDetail: (id: string) =>
+    ['global', 'platform', 'webhook-events', 'detail', id] as const,
+  platformReconciliationDiscrepancies: (
+    params: Record<string, string | undefined> = {},
+  ) => ['global', 'platform', 'reconciliation-discrepancies', params] as const,
+  platformUsers: (params: Record<string, string | undefined> = {}) =>
+    ['global', 'platform', 'users', params] as const,
+  platformUserDetail: (id: string) =>
+    ['global', 'platform', 'users', 'detail', id] as const,
 } as const
 
 /** The prefix every tenant-scoped key starts with — used by tests and tooling. */

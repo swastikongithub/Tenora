@@ -62,13 +62,18 @@ export const NAV_ITEMS: NavItem[] = [
 ]
 
 /**
- * Shown only to platform staff (docs/platform-admin-spec.md §4.5). Kept out of
- * NAV_ITEMS — that array is unconditional; TopNavbar appends this one entry
- * when `useCurrentUser().isStaff` is true. The nav link is UX only; the real
- * boundary is `IsPlatformStaff` on the backend.
+ * Shown only to platform staff (docs/operator-control-plane-spec.md). Kept
+ * out of NAV_ITEMS — that array is unconditional; TopNavbar appends this one
+ * entry when `useCurrentUser().isStaff` is true. The nav link is UX only;
+ * the real boundary is `IsPlatformStaff` on the backend.
+ *
+ * `/admin` is the canonical operator surface (docs/operator-control-plane
+ * -spec.md §D) — `/platform-admin` is now only a compatibility redirect to
+ * it (AppRoutes.tsx), so this link points at the new path directly rather
+ * than bouncing through the redirect on every click.
  */
 export const PLATFORM_ADMIN_NAV_ITEM: NavItem = {
-  to: '/platform-admin',
+  to: '/admin',
   label: 'Platform Admin',
   icon: (
     <svg {...iconProps}>

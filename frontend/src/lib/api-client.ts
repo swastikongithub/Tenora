@@ -75,8 +75,15 @@ async function request<T = unknown>(
   isRetry = false,
 ): Promise<T> {
   const djangoPath = apiBasePath() + path
-  const global = isGlobalPath(djangoPath)
-  const noAuth = isNoAuthPath(djangoPath)
+  // Operator Control Plane Phase 1 (docs/operator-control-plane-spec.md) is
+  // the first caller to ever pass a query string here (`?id=...` for a
+  // detail lookup, `?page=...` for pagination) — GLOBAL_PATHS/NO_AUTH_PATHS
+  // are exact-match sets of bare paths, so the lookup must run against the
+  // path only, never the query string. For every existing call site (no
+  // "?"), djangoPathOnly === djangoPath, so this changes nothing for them.
+  const djangoPathOnly = djangoPath.split('?')[0]
+  const global = isGlobalPath(djangoPathOnly)
+  const noAuth = isNoAuthPath(djangoPathOnly)
   const hasBody = body !== undefined && body !== null
 
   if (hasBody) assertNoTenantInBody(body)

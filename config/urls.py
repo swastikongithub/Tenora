@@ -23,7 +23,19 @@ from apps.billing.views import (
     RazorpayWebhookView,
     StartCheckoutView,
 )
-from apps.platform.views import PlatformStatsView, PlatformTenantListView
+from apps.platform.views import (
+    PlatformHealthView,
+    PlatformPlanDetailView,
+    PlatformPlanListView,
+    PlatformReconciliationDiscrepancyListView,
+    PlatformStatsView,
+    PlatformTenantDetailView,
+    PlatformTenantListView,
+    PlatformUserDetailView,
+    PlatformUserListView,
+    PlatformWebhookEventDetailView,
+    PlatformWebhookEventListView,
+)
 from apps.tenants.views import (
     MembershipListCreateView,
     MyTenantsView,
@@ -72,6 +84,44 @@ urlpatterns = [
         "api/platform/stats/",
         PlatformStatsView.as_view(),
         name="platform_stats",
+    ),
+    # --- Operator Control Plane, Phase 1 (docs/operator-control-plane-spec.md) ---
+    # Read-only. Detail lookups are `?id=` on a static path, not a `<uuid:pk>`
+    # segment — see apps/platform/views.py's module docstring for why.
+    path("api/platform/health/", PlatformHealthView.as_view(), name="platform_health"),
+    path(
+        "api/platform/plans/", PlatformPlanListView.as_view(), name="platform_plan_list"
+    ),
+    path(
+        "api/platform/plans/detail/",
+        PlatformPlanDetailView.as_view(),
+        name="platform_plan_detail",
+    ),
+    path(
+        "api/platform/tenants/detail/",
+        PlatformTenantDetailView.as_view(),
+        name="platform_tenant_detail",
+    ),
+    path(
+        "api/platform/webhook-events/",
+        PlatformWebhookEventListView.as_view(),
+        name="platform_webhook_event_list",
+    ),
+    path(
+        "api/platform/webhook-events/detail/",
+        PlatformWebhookEventDetailView.as_view(),
+        name="platform_webhook_event_detail",
+    ),
+    path(
+        "api/platform/reconciliation-discrepancies/",
+        PlatformReconciliationDiscrepancyListView.as_view(),
+        name="platform_reconciliation_discrepancy_list",
+    ),
+    path("api/platform/users/", PlatformUserListView.as_view(), name="platform_user_list"),
+    path(
+        "api/platform/users/detail/",
+        PlatformUserDetailView.as_view(),
+        name="platform_user_detail",
     ),
     # --- tenant-scoped (X-Tenant-ID resolved by TenantJWTAuthentication) ---
     path(

@@ -28,6 +28,20 @@ export const GLOBAL_PATHS: ReadonlySet<string> = new Set([
   // IsPlatformStaff server-side) — hence NOT in NO_AUTH_PATHS.
   '/api/platform/tenants/',
   '/api/platform/stats/',
+  // Operator Control Plane, Phase 1 (docs/operator-control-plane-spec.md) —
+  // kept byte-identical to apps/tenants/authentication.py's GLOBAL_PATHS.
+  // Detail lookups are `?id=` on a static path (see api-client.ts's
+  // djangoPathOnly — the query string is stripped before this set is
+  // checked, so the bare path below is the correct, complete entry).
+  '/api/platform/health/',
+  '/api/platform/plans/',
+  '/api/platform/plans/detail/',
+  '/api/platform/tenants/detail/',
+  '/api/platform/webhook-events/',
+  '/api/platform/webhook-events/detail/',
+  '/api/platform/reconciliation-discrepancies/',
+  '/api/platform/users/',
+  '/api/platform/users/detail/',
 ])
 
 /**

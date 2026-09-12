@@ -282,10 +282,238 @@ export const PLATFORM_STATS: PlatformStatsBody = {
   ],
 }
 
+/**
+ * Every paginated platform-admin list response shares this envelope
+ * (docs/operator-control-plane-spec.md §C — Phase 1 introduces pagination).
+ */
+export function paginated<T>(results: T[]): {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+} {
+  return { count: results.length, next: null, previous: null, results }
+}
+
 export const platformTenantsHandler = (
   tenants: PlatformTenantRow[] = PLATFORM_TENANTS,
-) => http.get(apiUrl('/platform/tenants/'), () => HttpResponse.json(tenants))
+) =>
+  http.get(apiUrl('/platform/tenants/'), () =>
+    HttpResponse.json(paginated(tenants)),
+  )
 
 export const platformStatsHandler = (
   stats: PlatformStatsBody = PLATFORM_STATS,
 ) => http.get(apiUrl('/platform/stats/'), () => HttpResponse.json(stats))
+
+// --- Operator Control Plane, Phase 1 (docs/operator-control-plane-spec.md) ---
+
+export interface PlatformHealthBody {
+  total_tenants: number
+  unprocessed_webhook_events: number
+  discrepancies_last_24h: number
+  last_webhook_received_at: string | null
+  last_usage_snapshot_at: string | null
+  last_discrepancy_detected_at: string | null
+  payment_gateway: string
+}
+
+export const PLATFORM_HEALTH: PlatformHealthBody = {
+  total_tenants: 3,
+  unprocessed_webhook_events: 1,
+  discrepancies_last_24h: 0,
+  last_webhook_received_at: '2026-03-01T00:00:00Z',
+  last_usage_snapshot_at: '2026-03-01T03:00:00Z',
+  last_discrepancy_detected_at: null,
+  payment_gateway: 'mock',
+}
+
+export const platformHealthHandler = (health: PlatformHealthBody = PLATFORM_HEALTH) =>
+  http.get(apiUrl('/platform/health/'), () => HttpResponse.json(health))
+
+export interface PlatformPlanRow {
+  id: string
+  name: string
+  code: string
+  price_cents: number
+  currency: string
+  interval: 'MONTHLY' | 'ANNUAL'
+  is_active: boolean
+  external_plan_id: string | null
+  subscriber_count: number
+}
+
+export const PLATFORM_PLANS: PlatformPlanRow[] = [
+  {
+    id: 'plan-pro',
+    name: 'Pro',
+    code: 'PRO',
+    price_cents: 2900,
+    currency: 'USD',
+    interval: 'MONTHLY',
+    is_active: true,
+    external_plan_id: 'ext_plan_pro',
+    subscriber_count: 2,
+  },
+  {
+    id: 'plan-legacy',
+    name: 'Legacy',
+    code: 'LEGACY',
+    price_cents: 1900,
+    currency: 'USD',
+    interval: 'MONTHLY',
+    is_active: false,
+    external_plan_id: null,
+    subscriber_count: 0,
+  },
+]
+
+export const platformPlansHandler = (plans: PlatformPlanRow[] = PLATFORM_PLANS) =>
+  http.get(apiUrl('/platform/plans/'), () => HttpResponse.json(paginated(plans)))
+
+export const platformPlanDetailHandler = (plan: PlatformPlanRow = PLATFORM_PLANS[0]) =>
+  http.get(apiUrl('/platform/plans/detail/'), () => HttpResponse.json(plan))
+
+export interface PlatformTenantDetailBody {
+  id: string
+  name: string
+  slug: string
+  created_at: string
+  is_active: boolean
+  memberships: Array<{ id: string; email: string; role: string; created_at: string }>
+  subscription: {
+    id: string
+    plan: { id: string; name: string; code: string; price_cents: number; currency: string }
+    status: string
+    current_period_start: string
+    current_period_end: string
+  } | null
+  recent_webhook_events: PlatformWebhookEventRow[]
+}
+
+export const PLATFORM_TENANT_DETAIL: PlatformTenantDetailBody = {
+  id: 'pt-1',
+  name: 'Northwind Trading',
+  slug: 'northwind',
+  created_at: '2026-01-05T00:00:00Z',
+  is_active: true,
+  memberships: [
+    { id: 'm-1', email: 'owner@northwind.test', role: 'OWNER', created_at: '2026-01-05T00:00:00Z' },
+  ],
+  subscription: {
+    id: 'sub-1',
+    plan: { id: 'plan-pro', name: 'Pro', code: 'PRO', price_cents: 2900, currency: 'USD' },
+    status: 'ACTIVE',
+    current_period_start: '2026-03-01T00:00:00Z',
+    current_period_end: '2026-03-31T00:00:00Z',
+  },
+  recent_webhook_events: [],
+}
+
+export const platformTenantDetailHandler = (
+  tenant: PlatformTenantDetailBody = PLATFORM_TENANT_DETAIL,
+) => http.get(apiUrl('/platform/tenants/detail/'), () => HttpResponse.json(tenant))
+
+export interface PlatformWebhookEventRow {
+  id: string
+  external_event_id: string
+  event_type: 'ACTIVATED' | 'CHARGED' | 'CANCELLED' | 'PAYMENT_TROUBLE' | 'UNKNOWN'
+  external_subscription_id: string | null
+  tenant: { id: string; name: string; slug: string } | null
+  period_start: string | null
+  period_end: string | null
+  event_created_at: string | null
+  received_at: string
+  processed: boolean
+}
+
+export const PLATFORM_WEBHOOK_EVENTS: PlatformWebhookEventRow[] = [
+  {
+    id: 'evt-1',
+    external_event_id: 'evt_charged_1',
+    event_type: 'CHARGED',
+    external_subscription_id: 'sub_ext_1',
+    tenant: { id: 'pt-1', name: 'Northwind Trading', slug: 'northwind' },
+    period_start: '2026-03-01T00:00:00Z',
+    period_end: '2026-03-31T00:00:00Z',
+    event_created_at: '2026-03-01T00:00:00Z',
+    received_at: '2026-03-01T00:05:00Z',
+    processed: true,
+  },
+]
+
+export const platformWebhookEventsHandler = (
+  events: PlatformWebhookEventRow[] = PLATFORM_WEBHOOK_EVENTS,
+) =>
+  http.get(apiUrl('/platform/webhook-events/'), () =>
+    HttpResponse.json(paginated(events)),
+  )
+
+export const platformWebhookEventDetailHandler = (
+  event: PlatformWebhookEventRow = PLATFORM_WEBHOOK_EVENTS[0],
+) => http.get(apiUrl('/platform/webhook-events/detail/'), () => HttpResponse.json(event))
+
+export interface PlatformDiscrepancyRow {
+  id: string
+  tenant: { id: string; name: string; slug: string }
+  subscription_id: string
+  external_subscription_id: string
+  category: 'STATUS_MISMATCH' | 'LOCAL_CANCELED_PROVIDER_ACTIVE' | 'PROVIDER_NOT_FOUND'
+  local_status: string
+  provider_status: string
+  detail: string
+  detected_at: string
+}
+
+export const PLATFORM_DISCREPANCIES: PlatformDiscrepancyRow[] = [
+  {
+    id: 'disc-1',
+    tenant: { id: 'pt-1', name: 'Northwind Trading', slug: 'northwind' },
+    subscription_id: 'sub-1',
+    external_subscription_id: 'sub_ext_1',
+    category: 'STATUS_MISMATCH',
+    local_status: 'ACTIVE',
+    provider_status: 'PAST_DUE',
+    detail: 'local ACTIVE vs provider PAST_DUE',
+    detected_at: '2026-03-02T00:00:00Z',
+  },
+]
+
+export const platformDiscrepanciesHandler = (
+  discrepancies: PlatformDiscrepancyRow[] = PLATFORM_DISCREPANCIES,
+) =>
+  http.get(apiUrl('/platform/reconciliation-discrepancies/'), () =>
+    HttpResponse.json(paginated(discrepancies)),
+  )
+
+export interface PlatformUserRow {
+  id: string
+  email: string
+  is_staff: boolean
+  is_superuser: boolean
+  is_active: boolean
+  email_verified: boolean
+  date_joined: string
+}
+
+export const PLATFORM_USERS: PlatformUserRow[] = [
+  {
+    id: 'staff-1',
+    email: 'operator@example.com',
+    is_staff: true,
+    is_superuser: false,
+    is_active: true,
+    email_verified: true,
+    date_joined: '2026-01-01T00:00:00Z',
+  },
+]
+
+export const platformUsersHandler = (users: PlatformUserRow[] = PLATFORM_USERS) =>
+  http.get(apiUrl('/platform/users/'), () => HttpResponse.json(paginated(users)))
+
+export const platformUserDetailHandler = (
+  user: PlatformUserRow & { memberships?: unknown[] } = {
+    ...PLATFORM_USERS[0],
+    memberships: [],
+  },
+) => http.get(apiUrl('/platform/users/detail/'), () => HttpResponse.json(user))

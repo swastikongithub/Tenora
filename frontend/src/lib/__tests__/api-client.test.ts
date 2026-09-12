@@ -144,6 +144,27 @@ describe('X-Tenant-ID header — exact GLOBAL_PATHS match', () => {
     await apiClient.get('/memberships/')
     expect(seen).toBeNull()
   })
+
+  it('matches GLOBAL_PATHS against the path only, ignoring a query string (Operator Control Plane Phase 1 detail lookups: ?id=...)', async () => {
+    // docs/operator-control-plane-spec.md — platform detail endpoints are a
+    // static path with the id in the query string (GLOBAL_PATHS is an
+    // exact-match frozenset that can't represent a dynamic segment). This is
+    // the first-ever query-string-bearing request in this app; without
+    // stripping "?..." before the GLOBAL_PATHS/NO_AUTH_PATHS check, this
+    // would incorrectly attach X-Tenant-ID to a global path.
+    setAccessToken('a')
+    setCurrentTenantId('tenant-abc')
+    let seen: string | null = 'unset'
+    server.use(
+      http.get(api('/platform/plans/detail/'), ({ request }) => {
+        seen = request.headers.get('x-tenant-id')
+        return HttpResponse.json({ id: 'plan-1' })
+      }),
+    )
+
+    await apiClient.get('/platform/plans/detail/?id=plan-1')
+    expect(seen).toBeNull()
+  })
 })
 
 describe('tenant id is never sent in a request body', () => {

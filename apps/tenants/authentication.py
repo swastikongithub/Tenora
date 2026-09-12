@@ -36,6 +36,21 @@ GLOBAL_PATHS = frozenset({
     # gated by IsPlatformStaff on the views, not by tenant resolution.
     "/api/platform/tenants/",  # GET: every tenant, platform staff only
     "/api/platform/stats/",    # GET: system-wide aggregates, platform staff only
+    # Operator Control Plane, Phase 1 (docs/operator-control-plane-spec.md) —
+    # same rationale as the two platform-admin paths above: cross-tenant by
+    # design, gated by IsPlatformStaff, not tenant resolution. Detail lookups
+    # are a static `.../detail/` path (id passed as a query param), so each
+    # is representable here as one more literal string — see
+    # apps/platform/views.py's module docstring for why.
+    "/api/platform/health/",
+    "/api/platform/plans/",
+    "/api/platform/plans/detail/",
+    "/api/platform/tenants/detail/",
+    "/api/platform/webhook-events/",
+    "/api/platform/webhook-events/detail/",
+    "/api/platform/reconciliation-discrepancies/",
+    "/api/platform/users/",
+    "/api/platform/users/detail/",
 })
 
 

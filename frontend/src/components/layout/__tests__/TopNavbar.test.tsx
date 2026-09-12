@@ -94,7 +94,7 @@ describe('TopNavbar', () => {
     const nav = await screen.findByRole('navigation', { name: 'Primary' })
     expect(
       await within(nav).findByRole('link', { name: 'Platform Admin' }),
-    ).toHaveAttribute('href', '/platform-admin')
+    ).toHaveAttribute('href', '/admin')
   })
 
   it('keeps the tenant switcher and account menu as siblings of the nav, always visible', async () => {

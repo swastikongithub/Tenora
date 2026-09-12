@@ -1,31 +1,30 @@
 /**
- * Platform Admin — docs/platform-admin-spec.md.
+ * /admin (index) — docs/operator-control-plane-spec.md §D: "the existing
+ * platform-admin page's content, evolved in place — moved, not copied."
  *
- * The one screen in this app that shows cross-tenant data. It is read-only and
- * reachable only by platform staff. The gate below is UX ONLY — the real
- * boundary is `IsPlatformStaff` on `/api/platform/*` server-side, which returns
- * 403 to any non-staff caller regardless of what renders here (same discipline
- * as every other client-side permission check in this project).
+ * This is the retired PlatformAdminPage.tsx's content (KPI row, status/plan
+ * charts, signups chart, tenant list), rendered as the index child of
+ * AdminLayout (which now owns the staff gate, the "Platform Admin" heading,
+ * and the section tab strip — none of that is duplicated here). Two
+ * additions: the tenant list now reads the paginated envelope Phase 1 adds
+ * to GET /api/platform/tenants/ (`.results`, not a bare array), and a small
+ * system-health row from the new GET /api/platform/health/.
  *
- * Two independent queries (tenants list + aggregate stats), each with its own
- * loading / error branch — no combined gate, matching the per-query failure
- * isolation the C6 Overview page established. Both keys are `['global', …]`
- * (query-keys.ts): this data is not tenant-scoped, so a tenant switch in the
- * navbar switcher must not drop it.
+ * Same per-query failure isolation as before: three independent queries,
+ * each with its own loading/error branch, no combined gate.
  */
 
-import { Navigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 
-import { Alert, Badge, Button, Card, Skeleton, Table } from '../components'
-import type { BadgeVariant, Column } from '../components'
-import { apiClient } from '../lib/api-client'
-import { formatDate } from '../lib/format'
-import { queryKeys } from '../lib/query-keys'
-import { useCurrentUser } from '../components/layout/use-current-user'
-import { PlatformBarChart } from './PlatformBarChart'
-import type { BarDatum } from './PlatformBarChart'
-import type { SubscriptionStatus } from './SubscriptionPage'
+import { Alert, Badge, Button, Card, Skeleton, Table } from '../../components'
+import type { BadgeVariant, Column } from '../../components'
+import { apiClient } from '../../lib/api-client'
+import { formatDate } from '../../lib/format'
+import { queryKeys } from '../../lib/query-keys'
+import { PlatformBarChart } from '../PlatformBarChart'
+import type { BarDatum } from '../PlatformBarChart'
+import type { SubscriptionStatus } from '../SubscriptionPage'
 
 type StatusKey = SubscriptionStatus | 'NONE'
 
@@ -38,6 +37,13 @@ interface PlatformTenant {
   subscription: { plan_name: string; status: SubscriptionStatus } | null
 }
 
+interface PaginatedResponse<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+}
+
 interface PlatformStats {
   total_tenants: number
   status_breakdown: Record<StatusKey, number>
@@ -45,10 +51,20 @@ interface PlatformStats {
   signups_over_time: Array<{ month: string; count: number }>
 }
 
-// Copied from SubscriptionPage.tsx (source of truth), not imported —
-// spec §11 / the same reason OverviewPage.tsx copies them: those maps are
-// module-private and that file must not be modified. The extra 'NONE' key is
-// this page's own — a tenant with no subscription at all.
+interface PlatformHealth {
+  total_tenants: number
+  unprocessed_webhook_events: number
+  discrepancies_last_24h: number
+  last_webhook_received_at: string | null
+  last_usage_snapshot_at: string | null
+  last_discrepancy_detected_at: string | null
+  payment_gateway: string
+}
+
+// Copied from SubscriptionPage.tsx (source of truth), not imported — same
+// reason OverviewPage.tsx / the retired PlatformAdminPage.tsx already did:
+// those maps are module-private and that file must not be modified. The
+// extra 'NONE' key is this page's own — a tenant with no subscription at all.
 const STATUS_VARIANT: Record<StatusKey, BadgeVariant> = {
   ACTIVE: 'success',
   TRIALING: 'warning',
@@ -65,13 +81,7 @@ const STATUS_LABEL: Record<StatusKey, string> = {
   NONE: 'No subscription',
 }
 
-const STATUS_ORDER: StatusKey[] = [
-  'ACTIVE',
-  'TRIALING',
-  'PAST_DUE',
-  'CANCELED',
-  'NONE',
-]
+const STATUS_ORDER: StatusKey[] = ['ACTIVE', 'TRIALING', 'PAST_DUE', 'CANCELED', 'NONE']
 
 /** "2026-01" → "Jan 2026"; leaves anything unparseable untouched. */
 function formatMonth(ym: string): string {
@@ -93,9 +103,7 @@ const tenantColumns: Array<Column<PlatformTenant>> = [
         <span className="block max-w-[16rem] truncate text-primary" title={t.name}>
           {t.name}
         </span>
-        <span className="block font-mono text-caption text-secondary">
-          {t.slug}
-        </span>
+        <span className="block font-mono text-caption text-secondary">{t.slug}</span>
       </div>
     ),
   },
@@ -125,48 +133,27 @@ const tenantColumns: Array<Column<PlatformTenant>> = [
   {
     key: 'created_at',
     header: 'Created',
-    render: (t) => (
-      <span className="whitespace-nowrap">{formatDate(t.created_at)}</span>
-    ),
+    render: (t) => <span className="whitespace-nowrap">{formatDate(t.created_at)}</span>,
   },
 ]
 
-export function PlatformAdminPage() {
-  const { isStaff, isStaffResolving } = useCurrentUser()
-
+export function AdminOverviewPage() {
   const stats = useQuery({
     queryKey: queryKeys.platformStats(),
     queryFn: () => apiClient.get<PlatformStats>('/platform/stats/'),
-    enabled: isStaff,
   })
 
   const tenants = useQuery({
     queryKey: queryKeys.platformTenants(),
-    queryFn: () => apiClient.get<PlatformTenant[]>('/platform/tenants/'),
-    enabled: isStaff,
+    queryFn: () =>
+      apiClient.get<PaginatedResponse<PlatformTenant>>('/platform/tenants/'),
   })
 
-  // Gate. `isStaffResolving` (not `resolving`) so a staff member who just
-  // logged in doesn't flash "access denied" while /users/me/ is still in
-  // flight — see use-current-user.ts.
-  if (isStaffResolving) {
-    return (
-      <div
-        className="grid min-h-[40vh] place-items-center text-secondary"
-        role="status"
-        aria-live="polite"
-      >
-        <span className="text-body">Loading&hellip;</span>
-      </div>
-    )
-  }
+  const health = useQuery({
+    queryKey: queryKeys.platformHealth(),
+    queryFn: () => apiClient.get<PlatformHealth>('/platform/health/'),
+  })
 
-  if (!isStaff) {
-    return <Navigate to="/overview" replace />
-  }
-
-  // Hoisted so the `stats.data` narrowing survives into the `.map` closures
-  // below (TS drops property narrowing inside nested callbacks).
   const statsData = stats.data
 
   const statusData: BarDatum[] = statsData
@@ -177,10 +164,7 @@ export function PlatformAdminPage() {
     : []
 
   const planData: BarDatum[] = statsData
-    ? statsData.plan_distribution.map((p) => ({
-        label: p.plan_name,
-        value: p.count,
-      }))
+    ? statsData.plan_distribution.map((p) => ({ label: p.plan_name, value: p.count }))
     : []
 
   const signupData: BarDatum[] = statsData
@@ -191,11 +175,55 @@ export function PlatformAdminPage() {
     : []
 
   return (
-    <section className="mx-auto max-w-5xl">
-      <h1 className="text-display text-primary">Platform Admin</h1>
-      <p className="mt-1 text-body text-secondary">
-        Every tenant and subscription across the system. Read-only.
-      </p>
+    <>
+      {/* System health */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        {health.isPending ? (
+          <div className="col-span-full">
+            <Skeleton count={1} height={56} label="Loading system health" />
+          </div>
+        ) : health.isError ? (
+          <div className="col-span-full">
+            <Alert
+              variant="danger"
+              action={
+                <Button size="sm" variant="secondary" onClick={() => health.refetch()}>
+                  Retry
+                </Button>
+              }
+            >
+              Couldn’t load system health.
+            </Alert>
+          </div>
+        ) : health.data ? (
+          <>
+            <Card>
+              <h2 className="text-caption text-secondary">Unprocessed webhooks</h2>
+              <p className="num mt-1 text-h2 text-primary">
+                {health.data.unprocessed_webhook_events}
+              </p>
+            </Card>
+            <Card>
+              <h2 className="text-caption text-secondary">Discrepancies (24h)</h2>
+              <p className="num mt-1 text-h2 text-primary">
+                {health.data.discrepancies_last_24h}
+              </p>
+            </Card>
+            <Card>
+              <h2 className="text-caption text-secondary">Last usage snapshot</h2>
+              <p className="mt-1 text-body text-primary">
+                {health.data.last_usage_snapshot_at
+                  ? formatDate(health.data.last_usage_snapshot_at)
+                  : '—'}
+              </p>
+            </Card>
+            <Card>
+              <h2 className="text-caption text-secondary">Payment gateway</h2>
+              <p className="mt-1 text-body text-primary">{health.data.payment_gateway}</p>
+            </Card>
+          </>
+        ) : null}
+      </div>
 
       {/* KPI row */}
       <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
@@ -220,9 +248,7 @@ export function PlatformAdminPage() {
           <>
             <Card>
               <h2 className="text-caption text-secondary">Total tenants</h2>
-              <p className="num mt-1 text-h2 text-primary">
-                {statsData.total_tenants}
-              </p>
+              <p className="num mt-1 text-h2 text-primary">{statsData.total_tenants}</p>
             </Card>
             {statusData.map((d) => (
               <Card key={d.label}>
@@ -274,7 +300,12 @@ export function PlatformAdminPage() {
 
       {/* Tenant list */}
       <div className="mt-10">
-        <h2 className="text-h2 text-primary">All tenants</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-h2 text-primary">All tenants</h2>
+          <Link to="/admin/tenants" className="text-label text-accent-600 hover:underline">
+            View all
+          </Link>
+        </div>
         <div className="mt-4">
           {tenants.isPending ? (
             <Skeleton count={6} height={52} label="Loading tenants" />
@@ -282,34 +313,26 @@ export function PlatformAdminPage() {
             <Alert
               variant="danger"
               action={
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => tenants.refetch()}
-                >
+                <Button size="sm" variant="secondary" onClick={() => tenants.refetch()}>
                   Retry
                 </Button>
               }
             >
               Couldn’t load the tenant list.
             </Alert>
-          ) : !tenants.data || tenants.data.length === 0 ? (
+          ) : !tenants.data || tenants.data.results.length === 0 ? (
             <Card>
-              <p className="text-body text-secondary">
-                No tenants in the system yet.
-              </p>
+              <p className="text-body text-secondary">No tenants in the system yet.</p>
             </Card>
           ) : (
             <Table
               caption="All tenants"
               columns={tenantColumns}
-              rows={tenants.data}
+              rows={tenants.data.results}
               rowKey={(t) => t.id}
               renderMobileCard={(t) => (
                 <>
-                  <span className="block truncate text-label text-primary">
-                    {t.name}
-                  </span>
+                  <span className="block truncate text-label text-primary">{t.name}</span>
                   <span className="block font-mono text-caption text-secondary">
                     {t.slug}
                   </span>
@@ -324,8 +347,7 @@ export function PlatformAdminPage() {
                     <span>{t.subscription?.plan_name ?? 'No plan'}</span>
                     <span>·</span>
                     <span>
-                      {t.member_count}{' '}
-                      {t.member_count === 1 ? 'member' : 'members'}
+                      {t.member_count} {t.member_count === 1 ? 'member' : 'members'}
                     </span>
                   </span>
                 </>
@@ -334,6 +356,6 @@ export function PlatformAdminPage() {
           )}
         </div>
       </div>
-    </section>
+    </>
   )
 }

@@ -92,6 +92,15 @@ class PlatformAuthTests(APITestCase):
 
 
 class PlatformTenantListTests(APITestCase):
+    """
+    Phase 1 (docs/operator-control-plane-spec.md §C) wraps this endpoint's
+    response in a paginated envelope — `resp.data["results"]` where these
+    tests used to read `resp.data` directly. This is a deliberate,
+    spec-approved contract change to an endpoint that is not tenant-facing
+    (platform-admin only), not a weakened test: every original assertion
+    about the row *shape* and *content* is unchanged, only the envelope.
+    """
+
     def setUp(self):
         self.staff = User.objects.create_user(
             email="operator@example.com", password=PASSWORD, is_staff=True
@@ -132,14 +141,17 @@ class PlatformTenantListTests(APITestCase):
         resp = self.client.get(TENANTS_URL)
 
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        names = {row["name"] for row in resp.data}
+        names = {row["name"] for row in resp.data["results"]}
         self.assertEqual(names, {"Alpha", "Beta", "Gamma"})
 
     def test_member_count_is_a_real_count(self):
         self._tenant_with_members("Alpha", "alpha", ["a1@x.com", "a2@x.com"])
         self._tenant_with_members("Beta", "beta", ["b1@x.com"])
 
-        rows = {row["name"]: row for row in self.client.get(TENANTS_URL).data}
+        rows = {
+            row["name"]: row
+            for row in self.client.get(TENANTS_URL).data["results"]
+        }
 
         self.assertEqual(rows["Alpha"]["member_count"], 2)
         self.assertEqual(rows["Beta"]["member_count"], 1)
@@ -149,7 +161,10 @@ class PlatformTenantListTests(APITestCase):
         self._tenant_with_members("Beta", "beta", ["b1@x.com"])
         _subscribe(with_sub, self.plan, Subscription.Status.ACTIVE)
 
-        rows = {row["name"]: row for row in self.client.get(TENANTS_URL).data}
+        rows = {
+            row["name"]: row
+            for row in self.client.get(TENANTS_URL).data["results"]
+        }
 
         self.assertEqual(
             rows["Alpha"]["subscription"],
@@ -160,7 +175,8 @@ class PlatformTenantListTests(APITestCase):
     def test_empty_system_returns_empty_list_not_error(self):
         resp = self.client.get(TENANTS_URL)
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data, [])
+        self.assertEqual(resp.data["count"], 0)
+        self.assertEqual(resp.data["results"], [])
 
 
 class PlatformStatsTests(APITestCase):

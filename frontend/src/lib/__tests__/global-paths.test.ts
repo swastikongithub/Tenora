@@ -18,8 +18,17 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
       '/api/auth/resend-verification/',
       '/api/auth/verify-email/',
       '/api/plans/',
+      '/api/platform/health/',
+      '/api/platform/plans/',
+      '/api/platform/plans/detail/',
+      '/api/platform/reconciliation-discrepancies/',
       '/api/platform/stats/',
       '/api/platform/tenants/',
+      '/api/platform/tenants/detail/',
+      '/api/platform/users/',
+      '/api/platform/users/detail/',
+      '/api/platform/webhook-events/',
+      '/api/platform/webhook-events/detail/',
       '/api/tenants/',
       '/api/tenants/me/',
       '/api/users/me/',
@@ -32,6 +41,10 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
     expect(isGlobalPath('/api/tenants/me/')).toBe(true)
     expect(isGlobalPath('/api/platform/tenants/')).toBe(true)
     expect(isGlobalPath('/api/platform/stats/')).toBe(true)
+    // Operator Control Plane Phase 1 (docs/operator-control-plane-spec.md) —
+    // detail endpoints are a static `.../detail/` path, not `<uuid:pk>`.
+    expect(isGlobalPath('/api/platform/plans/detail/')).toBe(true)
+    expect(isGlobalPath('/api/platform/webhook-events/detail/')).toBe(true)
 
     // A prefix test would wrongly exempt these — the exact reason the backend
     // set is exact-match (CLAUDE.md).
@@ -40,6 +53,9 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
     expect(isGlobalPath('/api/tenants/me')).toBe(false) // trailing slash matters
     expect(isGlobalPath('/api/memberships/')).toBe(false)
     expect(isGlobalPath('/api/subscriptions/current/')).toBe(false)
+    // A dynamic id segment, never accepted — only the literal `.../detail/`
+    // static path is exempt.
+    expect(isGlobalPath('/api/platform/plans/some-uuid/')).toBe(false)
   })
 })
 

@@ -4,16 +4,18 @@ import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { server } from '../../test/msw/server'
+import { server } from '../../../test/msw/server'
 import {
   apiUrl,
   authHandlers,
   currentSubscriptionHandler,
   membershipsHandler,
   MEMBERS_A,
+  PLATFORM_HEALTH,
   PLATFORM_STATS,
   PLATFORM_TENANTS,
   plansHandler,
+  platformHealthHandler,
   platformStatsHandler,
   platformTenantsHandler,
   subscriptionFor,
@@ -22,12 +24,12 @@ import {
   tenantsMeHandler,
   usersMeHandler,
   usersMeStaffHandler,
-} from '../../test/fixtures'
-import { AuthProvider } from '../../lib/auth'
-import { createQueryClient } from '../../lib/query-client'
-import { AppRoutes } from '../AppRoutes'
+} from '../../../test/fixtures'
+import { AuthProvider } from '../../../lib/auth'
+import { createQueryClient } from '../../../lib/query-client'
+import { AppRoutes } from '../../AppRoutes'
 
-function renderAt(path = '/platform-admin') {
+function renderAt(path = '/admin') {
   sessionStorage.setItem('billing.refresh_token', 'valid-refresh')
   localStorage.setItem('billing.last_tenant_id', TENANT_A.id)
   render(
@@ -45,17 +47,17 @@ beforeEach(() => {
   server.use(
     ...authHandlers(),
     tenantsMeHandler([TENANT_A]),
-    // So a redirect to /overview has something to render against.
     currentSubscriptionHandler(subscriptionFor(PLAN_PRO)),
     membershipsHandler(MEMBERS_A),
     plansHandler(),
     platformTenantsHandler(),
     platformStatsHandler(),
+    platformHealthHandler(),
   )
 })
 
-describe('PlatformAdminPage — access', () => {
-  it('renders the dashboard with real aggregated data for a platform-staff user', async () => {
+describe('/admin — access (docs/operator-control-plane-spec.md)', () => {
+  it('renders the operator overview with real aggregated data for platform staff', async () => {
     server.use(usersMeStaffHandler())
     renderAt()
 
@@ -63,46 +65,58 @@ describe('PlatformAdminPage — access', () => {
       await screen.findByRole('heading', { name: 'Platform Admin' }),
     ).toBeInTheDocument()
 
-    // KPI row — total plus the seeded status breakdown.
     const totalCard = (await screen.findByText('Total tenants')).closest(
       '.rounded-lg',
     ) as HTMLElement
     expect(within(totalCard).getByText(String(PLATFORM_STATS.total_tenants)))
       .toBeInTheDocument()
 
-    // Both chart panels are present.
     expect(
       screen.getByRole('heading', { name: 'Status & plan distribution' }),
     ).toBeInTheDocument()
+
+    // The system-health row (new in Phase 1).
+    const webhookCard = (await screen.findByText('Unprocessed webhooks')).closest(
+      '.rounded-lg',
+    ) as HTMLElement
     expect(
-      screen.getByRole('heading', { name: 'Signups over time' }),
+      within(webhookCard).getByText(String(PLATFORM_HEALTH.unprocessed_webhook_events)),
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole('img', { name: /tenants created per month/i }),
-    ).toBeInTheDocument()
+    expect(screen.getByText(PLATFORM_HEALTH.payment_gateway)).toBeInTheDocument()
 
     // The cross-tenant tenant list — every seeded tenant, together.
     for (const t of PLATFORM_TENANTS) {
       expect(await screen.findByText(t.name)).toBeInTheDocument()
     }
+
+    // The section tab strip (AdminLayout).
+    expect(screen.getByRole('link', { name: 'Plans' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Billing Events' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Audit Log' })).toBeInTheDocument()
   })
 
-  it('redirects a non-staff user away and never shows dashboard content', async () => {
+  it('redirects a non-staff user away and never shows operator content', async () => {
     server.use(usersMeHandler()) // is_staff: false
     renderAt()
 
-    // Lands on /overview (the redirect target).
-    expect(
-      await screen.findByRole('heading', { name: 'Team' }),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: 'Platform Admin' }),
     ).not.toBeInTheDocument()
-    // No cross-tenant data leaked into the DOM.
     expect(screen.queryByText('Initech')).not.toBeInTheDocument()
   })
 
-  it('shows a loading gate — no premature "access denied" flash — while is_staff is still unknown', async () => {
+  it('also redirects a non-staff user from a nested /admin route — one shared gate', async () => {
+    server.use(usersMeHandler())
+    renderAt('/admin/plans')
+
+    expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Platform Admin' }),
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows a loading gate — no premature "access denied" flash — while is_staff is unknown', async () => {
     let release: () => void = () => {}
     const gate = new Promise<void>((resolve) => {
       release = resolve
@@ -120,28 +134,22 @@ describe('PlatformAdminPage — access', () => {
 
     renderAt()
 
-    // While /users/me/ is in flight: the gate's loading state, and crucially
-    // NOT a redirect to /overview.
     const gates = await screen.findAllByText(/Loading/i)
     expect(gates.length).toBeGreaterThan(0)
-    expect(
-      screen.queryByRole('heading', { name: 'Team' }),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Team' })).not.toBeInTheDocument()
     expect(
       screen.queryByRole('heading', { name: 'Platform Admin' }),
     ).not.toBeInTheDocument()
 
     release()
 
-    // Once it resolves as staff, the dashboard renders — the redirect never
-    // happened.
     expect(
       await screen.findByRole('heading', { name: 'Platform Admin' }),
     ).toBeInTheDocument()
   })
 })
 
-describe('PlatformAdminPage — per-query failure isolation', () => {
+describe('/admin — per-query failure isolation', () => {
   it('keeps the tenant list when stats fail, and vice versa', async () => {
     server.use(
       usersMeStaffHandler(),
@@ -151,13 +159,52 @@ describe('PlatformAdminPage — per-query failure isolation', () => {
     )
     renderAt()
 
-    // Stats section shows its own error…
     expect(
       await screen.findByText('Couldn’t load platform statistics.'),
     ).toBeInTheDocument()
-    // …while the tenant list still renders in full.
     for (const t of PLATFORM_TENANTS) {
       expect(await screen.findByText(t.name)).toBeInTheDocument()
     }
+  })
+
+  it('keeps everything else when health fails', async () => {
+    server.use(
+      usersMeStaffHandler(),
+      http.get(apiUrl('/platform/health/'), () =>
+        HttpResponse.json({ detail: 'boom' }, { status: 500 }),
+      ),
+    )
+    renderAt()
+
+    expect(await screen.findByText('Couldn’t load system health.')).toBeInTheDocument()
+    const totalCard = (await screen.findByText('Total tenants')).closest(
+      '.rounded-lg',
+    ) as HTMLElement
+    expect(within(totalCard).getByText(String(PLATFORM_STATS.total_tenants)))
+      .toBeInTheDocument()
+  })
+})
+
+describe('/platform-admin — compatibility redirect', () => {
+  it('lands on the canonical /admin surface with real content, not a second page', async () => {
+    server.use(usersMeStaffHandler())
+    renderAt('/platform-admin')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Platform Admin' }),
+    ).toBeInTheDocument()
+    for (const t of PLATFORM_TENANTS) {
+      expect(await screen.findByText(t.name)).toBeInTheDocument()
+    }
+  })
+
+  it('redirects a non-staff user exactly like /admin does', async () => {
+    server.use(usersMeHandler())
+    renderAt('/platform-admin')
+
+    expect(await screen.findByRole('heading', { name: 'Team' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: 'Platform Admin' }),
+    ).not.toBeInTheDocument()
   })
 })
