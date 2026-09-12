@@ -484,6 +484,73 @@ class RoleManagementAuditTests(RootControlsTestBase):
         self.assertNotIn("password", json.dumps(event.metadata).lower())
 
 
+class DeactivationActuallyLocksOutTests(RootControlsTestBase):
+    """
+    Deactivating an operator is only a real control if it takes effect. It does
+    — but the mechanism is SimpleJWT's own `is_active` check inside
+    `get_user`, not anything this phase wrote, which is exactly why it is
+    pinned here rather than assumed: a change to the authentication stack that
+    dropped that check would turn a Root-tier security action into a no-op,
+    and nothing else in the suite would notice.
+
+    The consequence worth stating: an already-issued access token stops working
+    immediately, with no revocation step and no waiting for expiry.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self._auth(self.root)
+
+    def test_a_deactivated_operator_cannot_authenticate_at_all(self):
+        token = f"Bearer {AccessToken.for_user(self.staff)}"
+        self.client.credentials(HTTP_AUTHORIZATION=token)
+        self.assertEqual(
+            self.client.get("/api/platform/users/").status_code,
+            status.HTTP_200_OK,
+        )
+
+        self._auth(self.root)
+        self.client.patch(
+            _url(USERS_URL, self.staff.id), {"is_active": False}, format="json"
+        )
+
+        # The SAME token, never reissued and not yet expired.
+        self.client.credentials(HTTP_AUTHORIZATION=token)
+        self.assertEqual(
+            self.client.get("/api/platform/users/").status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_reactivating_restores_access(self):
+        self.client.patch(
+            _url(USERS_URL, self.staff.id), {"is_active": False}, format="json"
+        )
+        self.client.patch(
+            _url(USERS_URL, self.staff.id), {"is_active": True}, format="json"
+        )
+        self._auth(self.staff)
+        self.assertEqual(
+            self.client.get("/api/platform/users/").status_code,
+            status.HTTP_200_OK,
+        )
+
+    def test_a_deactivated_operator_is_no_longer_counted_as_root(self):
+        other_root = User.objects.create_user(
+            email="root2@example.com",
+            password=PASSWORD,
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client.patch(
+            _url(USERS_URL, other_root.id), {"is_active": False}, format="json"
+        )
+        # Only self.root qualifies now, so it cannot be demoted.
+        resp = self.client.patch(
+            _url(USERS_URL, self.root.id), {"is_superuser": False}, format="json"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+
+
 class RawWebhookPayloadTests(RootControlsTestBase):
     def setUp(self):
         super().setUp()
