@@ -9,11 +9,13 @@ set -e
 python manage.py migrate --noinput
 
 # Bootstrap-only convenience for hosts with no shell/SSH access (e.g.
-# Render's Free plan) to create the first superuser. The command itself is
-# the no-op guard: it does nothing unless DJANGO_SUPERUSER_EMAIL and
-# DJANGO_SUPERUSER_PASSWORD are both set, and never touches an
-# already-existing user — see apps/users/management/commands/
-# bootstrap_superuser.py.
+# Render's Free plan) to create or promote the first operator. The command
+# itself is the no-op guard: it does nothing unless DJANGO_SUPERUSER_EMAIL
+# and DJANGO_SUPERUSER_PASSWORD are both set. Creates a fully active,
+# verified superuser if no user with that email exists yet; PROMOTES an
+# existing user with that email in place (is_staff/is_superuser/is_active/
+# email_verified -> True) without touching its password — see
+# apps/users/management/commands/bootstrap_superuser.py.
 python manage.py bootstrap_superuser
 
 if [ "${SEED_DEMO_DATA:-false}" = "true" ]; then
