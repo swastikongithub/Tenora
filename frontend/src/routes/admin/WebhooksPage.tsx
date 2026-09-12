@@ -1,8 +1,9 @@
 /**
  * /admin/webhooks — every normalized webhook event, sanitized (never
- * raw_payload — see PlatformWebhookEventSerializer). No retry-sweep button
- * in Phase 1: docs/operator-control-plane-spec.md places the fallback sweep
- * controls in Phase 2, explicitly labeled temporary/fallback there.
+ * raw_payload — see PlatformWebhookEventSerializer). Phase 2 adds the
+ * webhook retry Fallback Sweep Control (docs/operator-control-plane-spec.md
+ * §B) — a manual trigger for WebhookProcessingService.process_pending(),
+ * used because no production worker is deployed.
  */
 
 import { useState } from 'react'
@@ -13,6 +14,7 @@ import type { Column } from '../../components'
 import { apiClient } from '../../lib/api-client'
 import { formatDate } from '../../lib/format'
 import { queryKeys } from '../../lib/query-keys'
+import { FallbackSweepControl } from './FallbackSweepControl'
 import { toSearchParams } from './query-params'
 
 type EventType = 'ACTIVATED' | 'CHARGED' | 'CANCELLED' | 'PAYMENT_TROUBLE' | 'UNKNOWN'
@@ -86,11 +88,20 @@ export function WebhooksPage() {
     <div>
       <h2 className="text-h2 text-primary">Webhooks</h2>
       <p className="mt-1 text-body text-secondary">
-        Every normalized gateway webhook event received. Fallback retry controls for a
-        backlog arrive in a later phase.
+        Every normalized gateway webhook event received.
       </p>
 
-      <div className="mt-4 flex flex-wrap items-end gap-4">
+      <div className="mt-4">
+        <FallbackSweepControl
+          title="Webhook retry sweep"
+          path="/platform/webhook-events/process-pending/"
+          describeResult={(r) =>
+            `${r.total} checked, ${r.processed} processed, ${r.deferred} deferred, ${r.failed} failed.`
+          }
+        />
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-end gap-4">
         <div className="flex flex-col gap-1.5">
           <label htmlFor="webhook-event-type-filter" className="text-label text-secondary">
             Event type

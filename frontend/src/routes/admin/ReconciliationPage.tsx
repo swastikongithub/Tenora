@@ -1,7 +1,10 @@
 /**
  * /admin/reconciliation — the immutable, detection-only
- * ReconciliationDiscrepancy audit trail. No "run sweep now" button in Phase
- * 1 — that fallback control (and the usage-snapshot one) is Phase 2.
+ * ReconciliationDiscrepancy audit trail. Phase 2 adds two Fallback Sweep
+ * Controls (docs/operator-control-plane-spec.md §B): reconciliation
+ * (ReconciliationService.reconcile_all) and usage snapshotting
+ * (UsageMeteringService.snapshot_all_subscribed) — the approved IA has no
+ * separate "usage" page, so its sweep lives here alongside reconciliation's.
  */
 
 import { useState } from 'react'
@@ -12,6 +15,7 @@ import type { BadgeVariant, Column } from '../../components'
 import { apiClient } from '../../lib/api-client'
 import { formatDate } from '../../lib/format'
 import { queryKeys } from '../../lib/query-keys'
+import { FallbackSweepControl } from './FallbackSweepControl'
 import { toSearchParams } from './query-params'
 
 type Category = 'STATUS_MISMATCH' | 'LOCAL_CANCELED_PROVIDER_ACTIVE' | 'PROVIDER_NOT_FOUND'
@@ -84,11 +88,31 @@ export function ReconciliationPage() {
       <h2 className="text-h2 text-primary">Reconciliation</h2>
       <p className="mt-1 text-body text-secondary">
         Detection-only: local subscription status compared against the payment gateway.
-        Nothing here is corrected automatically. A "run now" fallback control arrives in
-        a later phase.
+        Nothing here is corrected automatically.
       </p>
 
-      <div className="mt-4 flex flex-col gap-1.5" style={{ maxWidth: '20rem' }}>
+      <div className="mt-4 flex flex-col gap-4 sm:flex-row">
+        <div className="flex-1">
+          <FallbackSweepControl
+            title="Reconciliation sweep"
+            path="/platform/reconciliation/run/"
+            describeResult={(r) =>
+              `${r.total} checked, ${r.matched} matched, ${r.discrepancies} discrepancies, ${r.unavailable} unavailable.`
+            }
+          />
+        </div>
+        <div className="flex-1">
+          <FallbackSweepControl
+            title="Usage snapshot sweep"
+            path="/platform/usage/run/"
+            describeResult={(r) =>
+              `${r.total} tenants, ${r.created} new snapshots, ${r.existing} already existed, ${r.skipped} skipped.`
+            }
+          />
+        </div>
+      </div>
+
+      <div className="mt-6 flex flex-col gap-1.5" style={{ maxWidth: '20rem' }}>
         <label htmlFor="discrepancy-category-filter" className="text-label text-secondary">
           Category
         </label>

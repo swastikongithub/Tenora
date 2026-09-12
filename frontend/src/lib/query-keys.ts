@@ -72,6 +72,15 @@ export const queryKeys = {
     ['global', 'platform', 'users', params] as const,
   platformUserDetail: (id: string) =>
     ['global', 'platform', 'users', 'detail', id] as const,
+
+  /**
+   * Operator Control Plane, Phase 2 (docs/operator-control-plane-spec.md) —
+   * the audit-log read surface. Same 'global' namespacing as every other
+   * platform key; filters are part of the key for the same auto-refetch
+   * reason as above.
+   */
+  platformAuditLog: (params: Record<string, string | undefined> = {}) =>
+    ['global', 'platform', 'audit-log', params] as const,
 } as const
 
 /** The prefix every tenant-scoped key starts with — used by tests and tooling. */

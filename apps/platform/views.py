@@ -1,16 +1,17 @@
 """
-Platform-admin views — docs/platform-admin-spec.md, extended for Phase 1 of
-docs/operator-control-plane-spec.md (read-only operator surfaces).
+Platform-admin views — docs/platform-admin-spec.md, extended for Phase 1
+(read-only operator surfaces) and Phase 2 (the first mutation phase) of
+docs/operator-control-plane-spec.md.
 
 This module is the ONE place in the codebase that deliberately returns
 cross-tenant data in a single response. Every query here runs against the
 default manager and never calls `.for_tenant()` / reads `request.tenant` —
 that is the whole point, and it is stated at each query site, not only in
 the spec. Every view here is gated by IsPlatformStaff (a logged-in ordinary
-user must get 403, not 200).
+user must get 403, not 200) — Phase 2 introduces no Root-gated view; that
+tier is Phase 4.
 
-Phase 1 is read-only end to end: no view in this module writes anything.
-Detail lookups are `?id=` query-parameter based on a STATIC path
+Detail/action lookups are `?id=` query-parameter based on a STATIC path
 (`.../detail/`), not a `<uuid:pk>` path segment — apps.tenants.authentication
 .GLOBAL_PATHS is an exact-match frozenset of literal path strings (CLAUDE.md:
 "never prefix matching... a security control"), which cannot represent a
@@ -19,18 +20,30 @@ TenantJWTAuthentication itself — and docs/operator-control-plane-spec.md's own
 migration strategy reserves the only change to that file for Phase 5. A static
 `.../detail/` path with the id in the query string needs neither: it is one
 more literal string added to the existing frozenset, exactly like every entry
-already there.
+already there. Phase 2's subscription mutation uses this exact same
+convention (`PATCH .../subscriptions/detail/?id=`) for the identical reason.
+
+Phase 2 mutations are the first writes in this module. Every one of them
+reuses an existing domain service unmodified
+(SubscriptionService/WebhookProcessingService/ReconciliationService/
+UsageMeteringService) — no new business/state-machine logic is written here.
+Critical mutations (the subscription override) write their AuditEvent inside
+the same transaction as the service call, via AuditService.record_critical;
+observational ones (the three fallback sweeps) use
+AuditService.record_observational after the sweep has already run.
 """
 
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from apps.billing.models import (
@@ -42,9 +55,19 @@ from apps.billing.models import (
     WebhookEvent,
 )
 from apps.billing.gateway.base import EventType
+from apps.billing.serializers import SubscriptionSerializer, SubscriptionUpdateSerializer
+from apps.billing.services import (
+    IllegalStateTransition,
+    ReconciliationService,
+    SubscriptionService,
+    UsageMeteringService,
+    WebhookProcessingService,
+)
+from apps.platform.models import AuditEvent
 from apps.platform.pagination import PlatformPageNumberPagination
 from apps.platform.permissions import IsPlatformStaff
 from apps.platform.serializers import (
+    PlatformAuditEventSerializer,
     PlatformPlanSerializer,
     PlatformReconciliationDiscrepancySerializer,
     PlatformTenantSerializer,
@@ -52,11 +75,10 @@ from apps.platform.serializers import (
     PlatformUserSerializer,
     PlatformWebhookEventSerializer,
 )
-from apps.platform.services import resolve_tenants_for_external_subscription_ids
+from apps.platform.services import AuditService, resolve_tenants_for_external_subscription_ids
 from apps.platform.utils import parse_uuid_or_none
 from apps.tenants.models import Membership, Tenant
 from apps.tenants.serializers import MembershipSerializer, TenantSerializer
-from apps.billing.serializers import SubscriptionSerializer
 from apps.users.models import User
 
 # Marks the "tenant has no subscription at all" bucket in the status
@@ -547,4 +569,254 @@ class PlatformUserDetailView(APIView):
                 user, context={"memberships": memberships}
             ).data,
             status=status.HTTP_200_OK,
+        )
+
+
+class PlatformSubscriptionDetailView(APIView):
+    """
+    PATCH /api/platform/subscriptions/detail/?id=<uuid> — an operator
+    override of one tenant's subscription. Staff-tier (docs
+    /operator-control-plane-spec.md §B: "subscription overrides" are
+    routine, Staff-gated work, not Root).
+
+    Reuses SubscriptionUpdateSerializer (apps.billing.serializers) verbatim
+    — the same `{plan_id}` XOR `{status}` input contract and validation the
+    tenant-facing PATCH /api/subscriptions/current/ already enforces, so
+    there is exactly one place that decides what "ambiguous" or "empty"
+    input means. Every state/plan change itself goes through
+    SubscriptionService.change_plan / .transition_status — this view never
+    assigns `.status` or `.plan` directly, and cannot express a transition
+    those services don't already allow.
+
+    Critical audit (docs/operator-control-plane-spec.md's list): the
+    service call and AuditService.record_critical are wrapped in one
+    `transaction.atomic()` block here, in the VIEW — not inside
+    SubscriptionService, which stays completely unmodified. The service's
+    own `@transaction.atomic` decorator nests as a savepoint inside this
+    outer transaction, so a failed audit write rolls the subscription
+    change back too.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformStaff]
+
+    def _get_subscription(self, request):
+        sub_id = parse_uuid_or_none(request.query_params.get("id"))
+        if sub_id is None:
+            return None
+        try:
+            return Subscription.objects.select_related("plan", "tenant").get(pk=sub_id)
+        except Subscription.DoesNotExist:
+            return None
+
+    def patch(self, request):
+        subscription = self._get_subscription(request)
+        if subscription is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = SubscriptionUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if "plan_id" in data:
+            try:
+                plan = Plan.objects.get(id=data["plan_id"], is_active=True)
+            except Plan.DoesNotExist:
+                return Response(
+                    {"plan_id": ["No active plan with this id."]},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            from_plan_code = subscription.plan.code
+            tenant = subscription.tenant
+            try:
+                with transaction.atomic():
+                    subscription = SubscriptionService.change_plan(subscription, plan)
+                    AuditService.record_critical(
+                        actor=request.user,
+                        action="subscription.plan_changed",
+                        target_type="Subscription",
+                        target_id=subscription.id,
+                        summary=(
+                            f"Changed plan for tenant {tenant.slug} "
+                            f"from {from_plan_code} to {plan.code}"
+                        ),
+                        metadata={
+                            "tenant_id": str(tenant.id),
+                            "from_plan": from_plan_code,
+                            "to_plan": plan.code,
+                        },
+                    )
+            except IllegalStateTransition as exc:
+                return Response(
+                    {"plan_id": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            from_status = subscription.status
+            to_status = data["status"]
+            tenant = subscription.tenant
+            try:
+                with transaction.atomic():
+                    subscription = SubscriptionService.transition_status(
+                        subscription, to_status
+                    )
+                    AuditService.record_critical(
+                        actor=request.user,
+                        action="subscription.transitioned",
+                        target_type="Subscription",
+                        target_id=subscription.id,
+                        summary=(
+                            f"Transitioned subscription for tenant {tenant.slug} "
+                            f"from {from_status} to {to_status}"
+                        ),
+                        metadata={
+                            "tenant_id": str(tenant.id),
+                            "from_status": from_status,
+                            "to_status": to_status,
+                        },
+                    )
+            except IllegalStateTransition as exc:
+                return Response(
+                    {"status": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST
+                )
+
+        return Response(SubscriptionSerializer(subscription).data, status=status.HTTP_200_OK)
+
+
+class _PlatformSweepView(APIView):
+    """
+    Shared shape for the three fallback sweep triggers — docs
+    /operator-control-plane-spec.md §B "Fallback sweep controls — explicitly
+    temporary". Each subclass calls exactly one existing sweep-all service
+    entry point (no orchestration logic written here) and records an
+    observational audit entry describing the outcome. None of these three
+    service calls can raise under normal operation — each already catches
+    its own per-row/per-subscription failures internally and reports them
+    in its result object (see apps.billing.services) — so this base class
+    does not add its own try/except around the sweep call: a genuinely
+    unexpected exception must surface as a 500, never be swallowed to make
+    the button appear successful.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformStaff]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "platform-sweep"
+
+
+class PlatformWebhookProcessPendingView(_PlatformSweepView):
+    """POST /api/platform/webhook-events/process-pending/ — reuses
+    WebhookProcessingService.process_pending() exactly."""
+
+    def post(self, request):
+        result = WebhookProcessingService.process_pending()
+        body = {
+            "total": result.total,
+            "processed": len(result.processed),
+            "deferred": len(result.deferred),
+            "failed": len(result.failed),
+        }
+        AuditService.record_observational(
+            actor=request.user,
+            action="webhook.sweep_triggered",
+            target_type="WebhookEvent",
+            target_id="*",
+            summary=(
+                f"Webhook retry sweep: {body['total']} checked, "
+                f"{body['processed']} processed, {body['deferred']} deferred, "
+                f"{body['failed']} failed"
+            ),
+            metadata=body,
+        )
+        return Response(body, status=status.HTTP_200_OK)
+
+
+class PlatformReconciliationRunView(_PlatformSweepView):
+    """POST /api/platform/reconciliation/run/ — reuses
+    ReconciliationService.reconcile_all() exactly."""
+
+    def post(self, request):
+        result = ReconciliationService.reconcile_all()
+        body = {
+            "total": result.total,
+            "matched": len(result.matched),
+            "discrepancies": len(result.discrepancies),
+            "unavailable": len(result.unavailable),
+            "skipped": len(result.skipped),
+            "errors": len(result.errors),
+        }
+        AuditService.record_observational(
+            actor=request.user,
+            action="reconciliation.sweep_triggered",
+            target_type="Subscription",
+            target_id="*",
+            summary=(
+                f"Reconciliation sweep: {body['total']} checked, "
+                f"{body['discrepancies']} discrepancies found"
+            ),
+            metadata=body,
+        )
+        return Response(body, status=status.HTTP_200_OK)
+
+
+class PlatformUsageRunView(_PlatformSweepView):
+    """POST /api/platform/usage/run/ — reuses
+    UsageMeteringService.snapshot_all_subscribed() exactly."""
+
+    def post(self, request):
+        result = UsageMeteringService.snapshot_all_subscribed()
+        body = {
+            "total": result.total,
+            "created": len(result.records),
+            "existing": result.existing,
+            "skipped": result.skipped,
+        }
+        AuditService.record_observational(
+            actor=request.user,
+            action="usage.sweep_triggered",
+            target_type="Tenant",
+            target_id="*",
+            summary=(
+                f"Usage snapshot sweep: {body['total']} tenants, "
+                f"{body['created']} new snapshots, {body['existing']} already "
+                f"existed, {body['skipped']} skipped"
+            ),
+            metadata=body,
+        )
+        return Response(body, status=status.HTTP_200_OK)
+
+
+class PlatformAuditLogListView(APIView):
+    """
+    GET /api/platform/audit-log/ — every recorded operator action, newest
+    first. Staff-tier (a read, like every other list in this module).
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformStaff]
+
+    def get(self, request):
+        events = AuditEvent.objects.select_related("actor").order_by("-created_at")
+
+        actor_param = request.query_params.get("actor")
+        if actor_param:
+            actor_id = parse_uuid_or_none(actor_param)
+            events = events.filter(actor_id=actor_id) if actor_id else events.none()
+
+        action = request.query_params.get("action")
+        if action:
+            events = events.filter(action=action)
+
+        target_type = request.query_params.get("target_type")
+        if target_type:
+            events = events.filter(target_type=target_type)
+
+        is_critical = request.query_params.get("is_critical")
+        if is_critical is not None:
+            normalized = is_critical.strip().lower()
+            if normalized in ("true", "1"):
+                events = events.filter(is_critical=True)
+            elif normalized in ("false", "0"):
+                events = events.filter(is_critical=False)
+
+        paginator = PlatformPageNumberPagination()
+        page = paginator.paginate_queryset(events, request, view=self)
+        return paginator.get_paginated_response(
+            PlatformAuditEventSerializer(page, many=True).data
         )

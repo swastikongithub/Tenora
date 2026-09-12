@@ -18,17 +18,22 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
       '/api/auth/resend-verification/',
       '/api/auth/verify-email/',
       '/api/plans/',
+      '/api/platform/audit-log/',
       '/api/platform/health/',
       '/api/platform/plans/',
       '/api/platform/plans/detail/',
       '/api/platform/reconciliation-discrepancies/',
+      '/api/platform/reconciliation/run/',
       '/api/platform/stats/',
+      '/api/platform/subscriptions/detail/',
       '/api/platform/tenants/',
       '/api/platform/tenants/detail/',
+      '/api/platform/usage/run/',
       '/api/platform/users/',
       '/api/platform/users/detail/',
       '/api/platform/webhook-events/',
       '/api/platform/webhook-events/detail/',
+      '/api/platform/webhook-events/process-pending/',
       '/api/tenants/',
       '/api/tenants/me/',
       '/api/users/me/',
@@ -45,6 +50,13 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
     // detail endpoints are a static `.../detail/` path, not `<uuid:pk>`.
     expect(isGlobalPath('/api/platform/plans/detail/')).toBe(true)
     expect(isGlobalPath('/api/platform/webhook-events/detail/')).toBe(true)
+    // Operator Control Plane Phase 2 (docs/operator-control-plane-spec.md) —
+    // the first mutations, same static-path convention.
+    expect(isGlobalPath('/api/platform/subscriptions/detail/')).toBe(true)
+    expect(isGlobalPath('/api/platform/webhook-events/process-pending/')).toBe(true)
+    expect(isGlobalPath('/api/platform/reconciliation/run/')).toBe(true)
+    expect(isGlobalPath('/api/platform/usage/run/')).toBe(true)
+    expect(isGlobalPath('/api/platform/audit-log/')).toBe(true)
 
     // A prefix test would wrongly exempt these — the exact reason the backend
     // set is exact-match (CLAUDE.md).

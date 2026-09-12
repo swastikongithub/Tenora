@@ -42,6 +42,14 @@ export const GLOBAL_PATHS: ReadonlySet<string> = new Set([
   '/api/platform/reconciliation-discrepancies/',
   '/api/platform/users/',
   '/api/platform/users/detail/',
+  // Operator Control Plane, Phase 2 (docs/operator-control-plane-spec.md) —
+  // the first mutations. Same static-path-with-query-string convention as
+  // Phase 1's detail views for the subscription action.
+  '/api/platform/subscriptions/detail/',
+  '/api/platform/webhook-events/process-pending/',
+  '/api/platform/reconciliation/run/',
+  '/api/platform/usage/run/',
+  '/api/platform/audit-log/',
 ])
 
 /**

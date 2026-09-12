@@ -24,17 +24,22 @@ from apps.billing.views import (
     StartCheckoutView,
 )
 from apps.platform.views import (
+    PlatformAuditLogListView,
     PlatformHealthView,
     PlatformPlanDetailView,
     PlatformPlanListView,
     PlatformReconciliationDiscrepancyListView,
+    PlatformReconciliationRunView,
     PlatformStatsView,
+    PlatformSubscriptionDetailView,
     PlatformTenantDetailView,
     PlatformTenantListView,
+    PlatformUsageRunView,
     PlatformUserDetailView,
     PlatformUserListView,
     PlatformWebhookEventDetailView,
     PlatformWebhookEventListView,
+    PlatformWebhookProcessPendingView,
 )
 from apps.tenants.views import (
     MembershipListCreateView,
@@ -122,6 +127,34 @@ urlpatterns = [
         "api/platform/users/detail/",
         PlatformUserDetailView.as_view(),
         name="platform_user_detail",
+    ),
+    # --- Operator Control Plane, Phase 2 (docs/operator-control-plane-spec.md) ---
+    # The first mutations. Subscription detail is `.../detail/?id=`, same
+    # static-path convention as the Phase 1 detail views, same reason.
+    path(
+        "api/platform/subscriptions/detail/",
+        PlatformSubscriptionDetailView.as_view(),
+        name="platform_subscription_detail",
+    ),
+    path(
+        "api/platform/webhook-events/process-pending/",
+        PlatformWebhookProcessPendingView.as_view(),
+        name="platform_webhook_process_pending",
+    ),
+    path(
+        "api/platform/reconciliation/run/",
+        PlatformReconciliationRunView.as_view(),
+        name="platform_reconciliation_run",
+    ),
+    path(
+        "api/platform/usage/run/",
+        PlatformUsageRunView.as_view(),
+        name="platform_usage_run",
+    ),
+    path(
+        "api/platform/audit-log/",
+        PlatformAuditLogListView.as_view(),
+        name="platform_audit_log",
     ),
     # --- tenant-scoped (X-Tenant-ID resolved by TenantJWTAuthentication) ---
     path(

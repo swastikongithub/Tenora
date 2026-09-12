@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.billing.models import Plan, ReconciliationDiscrepancy, Subscription, WebhookEvent
+from apps.platform.models import AuditEvent
 from apps.tenants.models import Tenant
 from apps.users.models import User
 
@@ -169,3 +170,37 @@ class PlatformUserDetailSerializer(PlatformUserSerializer):
         # same batch-then-serialize shape as PlatformWebhookEventSerializer's
         # tenant_map above, not a per-instance query.
         return self.context.get("memberships", [])
+
+
+class PlatformAuditEventSerializer(serializers.ModelSerializer):
+    """
+    Output only — GET /api/platform/audit-log/. `actor` is shaped as a small
+    {id, email} summary (or null once the account is gone — AuditEvent.actor
+    is SET_NULL), the same nested-summary convention every other FK on this
+    surface already uses (compare `tenant` on
+    PlatformReconciliationDiscrepancySerializer). `metadata` is returned
+    verbatim — the write-time discipline (never a password/secret/raw
+    payload) lives in AuditService, not here; this serializer adds no
+    redaction of its own because none should ever be needed.
+    """
+
+    actor = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AuditEvent
+        fields = [
+            "id",
+            "actor",
+            "action",
+            "target_type",
+            "target_id",
+            "summary",
+            "metadata",
+            "is_critical",
+            "created_at",
+        ]
+
+    def get_actor(self, obj):
+        if not obj.actor_id or obj.actor is None:
+            return None
+        return {"id": str(obj.actor_id), "email": obj.actor.email}

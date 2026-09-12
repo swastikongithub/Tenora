@@ -1,18 +1,27 @@
 /**
  * /admin/tenants/:id — one tenant's operator view: tenant info, memberships,
  * subscription, and its most recent normalized webhook events (sanitized —
- * never raw_payload). Read-only (no override controls — those are Phase 2+).
+ * never raw_payload). Phase 2 adds the subscription override controls
+ * (docs/operator-control-plane-spec.md §E): plan change and status
+ * transition, both confirm-before-mutate, both calling PATCH
+ * /api/platform/subscriptions/detail/?id= — the same
+ * SubscriptionService.change_plan / .transition_status the tenant-facing
+ * app uses. Nothing here decides which transitions are legal; the backend
+ * does, and an illegal one comes back as a plain error the modal shows.
  */
 
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Alert, Badge, Button, DataList, Skeleton, Table } from '../../components'
 import type { BadgeVariant, Column } from '../../components'
 import { apiClient } from '../../lib/api-client'
+import { ApiError } from '../../lib/api-error'
 import { formatDate, formatMoney } from '../../lib/format'
 import { queryKeys } from '../../lib/query-keys'
 import type { SubscriptionStatus } from '../SubscriptionPage'
+import { SubscriptionOverrideModal } from './SubscriptionOverrideModal'
 
 interface Membership {
   id: string
@@ -49,12 +58,28 @@ interface TenantDetail {
   recent_webhook_events: WebhookEventRow[]
 }
 
+interface PlatformPlan {
+  id: string
+  name: string
+  code: string
+  is_active: boolean
+}
+
+interface PaginatedResponse<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T[]
+}
+
 const STATUS_VARIANT: Record<SubscriptionStatus, BadgeVariant> = {
   ACTIVE: 'success',
   TRIALING: 'warning',
   PAST_DUE: 'danger',
   CANCELED: 'neutral',
 }
+
+const ALL_STATUSES: SubscriptionStatus[] = ['TRIALING', 'ACTIVE', 'PAST_DUE', 'CANCELED']
 
 const membershipColumns: Array<Column<Membership>> = [
   { key: 'email', header: 'Email' },
@@ -76,13 +101,39 @@ const eventColumns: Array<Column<WebhookEventRow>> = [
   { key: 'received_at', header: 'Received', render: (e) => formatDate(e.received_at) },
 ]
 
+function messageFor(cause: unknown): string {
+  return cause instanceof ApiError ? cause.message : 'Something went wrong. Please try again.'
+}
+
+interface PendingOverride {
+  kind: 'plan' | 'status'
+  toValue: string
+  toLabel: string
+}
+
 export function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const queryClient = useQueryClient()
+
+  const [planChoice, setPlanChoice] = useState('')
+  const [statusChoice, setStatusChoice] = useState<'' | SubscriptionStatus>('')
+  const [pending, setPending] = useState<PendingOverride | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const tenant = useQuery({
     queryKey: queryKeys.platformTenantDetail(id ?? ''),
     queryFn: () => apiClient.get<TenantDetail>(`/platform/tenants/detail/?id=${id}`),
     enabled: Boolean(id),
+  })
+
+  // Only fetched once a subscription exists — the plan-change control has
+  // nothing to offer otherwise.
+  const plans = useQuery({
+    queryKey: queryKeys.platformPlans({ is_active: 'true' }),
+    queryFn: () =>
+      apiClient.get<PaginatedResponse<PlatformPlan>>('/platform/plans/?is_active=true'),
+    enabled: Boolean(tenant.data?.subscription),
   })
 
   if (tenant.isPending) {
@@ -106,6 +157,42 @@ export function TenantDetailPage() {
 
   const data = tenant.data
   if (!data) return null
+  const subscription = data.subscription
+
+  async function confirmOverride() {
+    if (!pending || !subscription) return
+    setSubmitting(true)
+    setActionError(null)
+    try {
+      await apiClient.patch(
+        `/platform/subscriptions/detail/?id=${subscription.id}`,
+        pending.kind === 'plan'
+          ? { plan_id: pending.toValue }
+          : { status: pending.toValue },
+      )
+      setSubmitting(false)
+      setPending(null)
+      setPlanChoice('')
+      setStatusChoice('')
+      // Refetch — the subscription/tenant queries this page (and the
+      // tenant list) depend on, so the new state shows up immediately
+      // rather than waiting for a stale cache to expire.
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.platformTenantDetail(id ?? ''),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['global', 'platform', 'tenants'],
+      })
+    } catch (cause) {
+      setSubmitting(false)
+      setActionError(messageFor(cause))
+    }
+  }
+
+  const availablePlans = (plans.data?.results ?? []).filter(
+    (p) => p.id !== subscription?.plan.id,
+  )
+  const availableStatuses = ALL_STATUSES.filter((s) => s !== subscription?.status)
 
   return (
     <div>
@@ -118,13 +205,13 @@ export function TenantDetailPage() {
           { term: 'Created', children: formatDate(data.created_at) },
           {
             term: 'Plan',
-            children: data.subscription ? data.subscription.plan.name : '—',
+            children: subscription ? subscription.plan.name : '—',
           },
           {
             term: 'Subscription status',
-            children: data.subscription ? (
-              <Badge variant={STATUS_VARIANT[data.subscription.status]}>
-                {data.subscription.status}
+            children: subscription ? (
+              <Badge variant={STATUS_VARIANT[subscription.status]}>
+                {subscription.status}
               </Badge>
             ) : (
               <span className="text-secondary">No subscription</span>
@@ -132,15 +219,91 @@ export function TenantDetailPage() {
           },
           {
             term: 'Price',
-            children: data.subscription
-              ? formatMoney(
-                  data.subscription.plan.price_cents,
-                  data.subscription.plan.currency,
-                )
+            children: subscription
+              ? formatMoney(subscription.plan.price_cents, subscription.plan.currency)
               : '—',
           },
         ]}
       />
+
+      {subscription && (
+        <div className="mt-6 max-w-[42rem] rounded-md border border-subtle bg-raised p-4">
+          <p className="text-label font-medium text-primary">Operator overrides</p>
+          <p className="mt-1 text-caption text-secondary">
+            Calls the same subscription service the tenant-facing app uses —
+            an illegal transition is rejected, never silently applied. Errors
+            render inside the confirm dialog, the same as every other
+            mutating control on this surface.
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-end gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="plan-override-select" className="text-label text-secondary">
+                Change plan
+              </label>
+              <select
+                id="plan-override-select"
+                value={planChoice}
+                onChange={(e) => setPlanChoice(e.target.value)}
+                className="h-10 rounded-sm border border-strong bg-base px-3 text-body text-primary"
+              >
+                <option value="">Select a plan…</option>
+                {availablePlans.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!planChoice}
+              onClick={() => {
+                const target = availablePlans.find((p) => p.id === planChoice)
+                if (!target) return
+                setActionError(null)
+                setPending({ kind: 'plan', toValue: target.id, toLabel: target.name })
+              }}
+            >
+              Apply
+            </Button>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-end gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="status-override-select" className="text-label text-secondary">
+                Transition status
+              </label>
+              <select
+                id="status-override-select"
+                value={statusChoice}
+                onChange={(e) => setStatusChoice(e.target.value as '' | SubscriptionStatus)}
+                className="h-10 rounded-sm border border-strong bg-base px-3 text-body text-primary"
+              >
+                <option value="">Select a status…</option>
+                {availableStatuses.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!statusChoice}
+              onClick={() => {
+                if (!statusChoice) return
+                setActionError(null)
+                setPending({ kind: 'status', toValue: statusChoice, toLabel: statusChoice })
+              }}
+            >
+              Apply
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-10">
         <h3 className="text-h2 text-primary">Members</h3>
@@ -182,6 +345,23 @@ export function TenantDetailPage() {
           )}
         </div>
       </div>
+
+      {subscription && (
+        <SubscriptionOverrideModal
+          open={pending !== null}
+          kind={pending?.kind ?? 'status'}
+          tenantName={data.name}
+          fromLabel={pending?.kind === 'plan' ? subscription.plan.name : subscription.status}
+          toLabel={pending?.toLabel ?? ''}
+          submitting={submitting}
+          error={actionError}
+          onConfirm={() => void confirmOverride()}
+          onClose={() => {
+            setPending(null)
+            setActionError(null)
+          }}
+        />
+      )}
     </div>
   )
 }

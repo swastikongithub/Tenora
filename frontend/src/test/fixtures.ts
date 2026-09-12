@@ -517,3 +517,90 @@ export const platformUserDetailHandler = (
     memberships: [],
   },
 ) => http.get(apiUrl('/platform/users/detail/'), () => HttpResponse.json(user))
+
+// --- Operator Control Plane, Phase 2 (docs/operator-control-plane-spec.md) ---
+
+/** `PATCH /api/platform/subscriptions/detail/?id=` — echoes back an updated
+ * subscription row (the shape TenantDetailPage's `subscription` re-reads). */
+export const platformSubscriptionPatchHandler = (
+  subscription: PlatformTenantDetailBody['subscription'] = PLATFORM_TENANT_DETAIL.subscription,
+) =>
+  http.patch(apiUrl('/platform/subscriptions/detail/'), () =>
+    HttpResponse.json(subscription),
+  )
+
+export const platformSubscriptionPatchErrorHandler = (
+  field: 'plan_id' | 'status',
+  message: string,
+) =>
+  http.patch(apiUrl('/platform/subscriptions/detail/'), () =>
+    HttpResponse.json({ [field]: [message] }, { status: 400 }),
+  )
+
+export interface SweepResultBody {
+  total: number
+  [key: string]: number
+}
+
+export const platformProcessPendingHandler = (
+  result: SweepResultBody = { total: 3, processed: 2, deferred: 1, failed: 0 },
+) =>
+  http.post(apiUrl('/platform/webhook-events/process-pending/'), () =>
+    HttpResponse.json(result),
+  )
+
+export const platformReconciliationRunHandler = (
+  result: SweepResultBody = {
+    total: 2,
+    matched: 2,
+    discrepancies: 0,
+    unavailable: 0,
+    skipped: 0,
+    errors: 0,
+  },
+) => http.post(apiUrl('/platform/reconciliation/run/'), () => HttpResponse.json(result))
+
+export const platformUsageRunHandler = (
+  result: SweepResultBody = { total: 2, created: 2, existing: 0, skipped: 0 },
+) => http.post(apiUrl('/platform/usage/run/'), () => HttpResponse.json(result))
+
+export interface PlatformAuditEventRow {
+  id: string
+  actor: { id: string; email: string } | null
+  action: string
+  target_type: string
+  target_id: string
+  summary: string
+  metadata: Record<string, unknown>
+  is_critical: boolean
+  created_at: string
+}
+
+export const PLATFORM_AUDIT_EVENTS: PlatformAuditEventRow[] = [
+  {
+    id: 'audit-1',
+    actor: { id: 'staff-1', email: 'operator@example.com' },
+    action: 'subscription.transitioned',
+    target_type: 'Subscription',
+    target_id: 'sub-1',
+    summary: 'Transitioned subscription for tenant northwind from ACTIVE to PAST_DUE',
+    metadata: { from_status: 'ACTIVE', to_status: 'PAST_DUE' },
+    is_critical: true,
+    created_at: '2026-03-05T00:00:00Z',
+  },
+  {
+    id: 'audit-2',
+    actor: { id: 'staff-1', email: 'operator@example.com' },
+    action: 'webhook.sweep_triggered',
+    target_type: 'WebhookEvent',
+    target_id: '*',
+    summary: 'Webhook retry sweep: 3 checked, 2 processed, 1 deferred, 0 failed',
+    metadata: { total: 3, processed: 2, deferred: 1, failed: 0 },
+    is_critical: false,
+    created_at: '2026-03-04T00:00:00Z',
+  },
+]
+
+export const platformAuditLogHandler = (
+  events: PlatformAuditEventRow[] = PLATFORM_AUDIT_EVENTS,
+) => http.get(apiUrl('/platform/audit-log/'), () => HttpResponse.json(paginated(events)))

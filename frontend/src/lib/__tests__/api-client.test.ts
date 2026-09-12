@@ -165,6 +165,21 @@ describe('X-Tenant-ID header — exact GLOBAL_PATHS match', () => {
     await apiClient.get('/platform/plans/detail/?id=plan-1')
     expect(seen).toBeNull()
   })
+
+  it('applies the same query-string stripping to a PATCH (Operator Control Plane Phase 2 subscription override)', async () => {
+    setAccessToken('a')
+    setCurrentTenantId('tenant-abc')
+    let seen: string | null = 'unset'
+    server.use(
+      http.patch(api('/platform/subscriptions/detail/'), ({ request }) => {
+        seen = request.headers.get('x-tenant-id')
+        return HttpResponse.json({ id: 'sub-1' })
+      }),
+    )
+
+    await apiClient.patch('/platform/subscriptions/detail/?id=sub-1', { status: 'PAST_DUE' })
+    expect(seen).toBeNull()
+  })
 })
 
 describe('tenant id is never sent in a request body', () => {

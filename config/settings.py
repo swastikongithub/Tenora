@@ -175,6 +175,10 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "register": "10/hour",
         "resend-verification": "5/hour",
+        # docs/operator-control-plane-spec.md §B "Fallback sweep controls":
+        # bounds a compromised operator token from driving repeated, costly
+        # sweep runs, while staying generous for legitimate manual retries.
+        "platform-sweep": "10/hour",
     },
 }
 
