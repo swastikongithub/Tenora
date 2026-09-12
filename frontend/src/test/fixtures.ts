@@ -222,6 +222,8 @@ export interface PlatformTenantRow {
   name: string
   slug: string
   created_at: string
+  /** Workspace access, not subscription state — Phase 5. */
+  is_active: boolean
   member_count: number
   subscription: { plan_name: string; status: SubscriptionRow['status'] } | null
 }
@@ -242,6 +244,7 @@ export const PLATFORM_TENANTS: PlatformTenantRow[] = [
     name: 'Northwind Trading',
     slug: 'northwind',
     created_at: '2026-01-05T00:00:00Z',
+    is_active: true,
     member_count: 3,
     subscription: { plan_name: 'Pro', status: 'ACTIVE' },
   },
@@ -250,6 +253,7 @@ export const PLATFORM_TENANTS: PlatformTenantRow[] = [
     name: 'Globex',
     slug: 'globex',
     created_at: '2026-02-11T00:00:00Z',
+    is_active: true,
     member_count: 1,
     subscription: { plan_name: 'Team', status: 'TRIALING' },
   },
@@ -258,6 +262,9 @@ export const PLATFORM_TENANTS: PlatformTenantRow[] = [
     name: 'Initech',
     slug: 'initech',
     created_at: '2026-02-20T00:00:00Z',
+    // Suspended by an operator, and still without a subscription — the two
+    // are independent facts, which is why the list shows them separately.
+    is_active: false,
     member_count: 2,
     subscription: null,
   },
@@ -730,4 +737,22 @@ export const platformWebhookRawErrorHandler = (status = 403) =>
       { detail: 'This action is restricted to root operators.' },
       { status },
     ),
+  )
+
+// --- Operator Control Plane, Phase 5 (tenant suspend / reactivate) ---
+
+/** `PATCH /api/platform/tenants/detail/?id=` — echoes back the updated tenant. */
+export const platformTenantPatchHandler = (
+  tenant: Partial<PlatformTenantDetailBody> = { is_active: false },
+) =>
+  http.patch(apiUrl('/platform/tenants/detail/'), () =>
+    HttpResponse.json({ ...PLATFORM_TENANT_DETAIL, ...tenant }),
+  )
+
+export const platformTenantPatchErrorHandler = (
+  detail = 'This action is restricted to root operators.',
+  status = 403,
+) =>
+  http.patch(apiUrl('/platform/tenants/detail/'), () =>
+    HttpResponse.json({ detail }, { status }),
   )

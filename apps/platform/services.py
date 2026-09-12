@@ -5,7 +5,9 @@ Phase 1 additions here are read-time helpers only. Phase 2 adds AuditService
 — the two explicit write paths every operator mutation records through.
 Phase 3 adds PlanManagementService, the one genuinely new domain capability
 in this design (spec §B reuse table). Phase 4 adds UserRoleService — the one
-place "who has power" ever changes, guarded by the last-root invariant.
+place "who has power" ever changes, guarded by the last-root invariant. Phase
+5 adds TenantSuspensionService, whose effect is enforced at the existing
+authentication boundary rather than by anything in this module.
 """
 
 import logging
@@ -462,3 +464,59 @@ class UserRoleService:
         """How many accounts currently satisfy the Root predicate. A read, for
         the operator UI to show why a demotion would be refused."""
         return User.objects.filter(ROOT_Q).count()
+
+
+class TenantSuspensionService:
+    """
+    Phase 5 — docs/operator-control-plane-spec.md §B/§F: suspend or reactivate
+    an entire tenant. Root-tier, "the highest-risk phase, deliberately last",
+    because it is the only operator action that can take a paying customer's
+    whole workspace offline.
+
+    There is NO new tenant-status model or field. `Tenant.is_active` already
+    exists and already means exactly this; the master plan's own rule is to use
+    the existing lifecycle state rather than create a second one, and a
+    parallel `status` column would immediately raise the question of which of
+    the two is authoritative.
+
+    Until this phase nothing read that field at request time — it was carried
+    on the model and serialized, but never enforced. Phase 5 makes it load-
+    bearing in exactly one place: `TenantJWTAuthentication`.
+
+    Suspension is NOT cancellation. It touches no Subscription, calls no
+    gateway, and stops no billing — the provider keeps whatever mandate it has.
+    Conflating the two here would mean an operator pausing access also silently
+    changed the customer's financial state, which is a different decision
+    belonging to a different service.
+    """
+
+    @staticmethod
+    @transaction.atomic
+    def set_active(*, actor, tenant, is_active):
+        """
+        Suspend (`is_active=False`) or reactivate (`True`) `tenant`, atomically
+        with its critical audit row. A no-op writes and records nothing.
+        """
+        if tenant.is_active == is_active:
+            return tenant
+
+        tenant.is_active = is_active
+        tenant.save(update_fields=["is_active"])
+
+        AuditService.record_critical(
+            actor=actor,
+            action="tenant.reactivated" if is_active else "tenant.suspended",
+            target_type="Tenant",
+            target_id=tenant.id,
+            summary=(
+                f"{'Reactivated' if is_active else 'Suspended'} tenant "
+                f"{tenant.slug}"
+            ),
+            metadata={
+                "slug": tenant.slug,
+                "name": tenant.name,
+                "before": {"is_active": not is_active},
+                "after": {"is_active": is_active},
+            },
+        )
+        return tenant

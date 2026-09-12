@@ -8,14 +8,20 @@
  * SubscriptionService.change_plan / .transition_status the tenant-facing
  * app uses. Nothing here decides which transitions are legal; the backend
  * does, and an illegal one comes back as a plain error the modal shows.
+ *
+ * Phase 5 adds the Root-only suspend/reactivate control. It is deliberately
+ * kept apart from the subscription overrides above it, visually and in the
+ * copy: suspending a workspace is an ACCESS decision that changes no billing
+ * state, and an operator must never reach for one believing it does the other.
  */
 
 import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
-import { Alert, Badge, Button, DataList, Skeleton, Table } from '../../components'
+import { Alert, Badge, Button, DataList, Modal, Skeleton, Table } from '../../components'
 import type { BadgeVariant, Column } from '../../components'
+import { useCurrentUser } from '../../components/layout/use-current-user'
 import { apiClient } from '../../lib/api-client'
 import { ApiError } from '../../lib/api-error'
 import { formatDate, formatMoney } from '../../lib/format'
@@ -114,7 +120,9 @@ interface PendingOverride {
 export function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
   const queryClient = useQueryClient()
+  const { isRoot } = useCurrentUser()
 
+  const [suspendOpen, setSuspendOpen] = useState(false)
   const [planChoice, setPlanChoice] = useState('')
   const [statusChoice, setStatusChoice] = useState<'' | SubscriptionStatus>('')
   const [pending, setPending] = useState<PendingOverride | null>(null)
@@ -189,6 +197,27 @@ export function TenantDetailPage() {
     }
   }
 
+  async function setTenantActive(nextActive: boolean) {
+    setSubmitting(true)
+    setActionError(null)
+    try {
+      await apiClient.patch(`/platform/tenants/detail/?id=${id}`, {
+        is_active: nextActive,
+      })
+      setSubmitting(false)
+      setSuspendOpen(false)
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.platformTenantDetail(id ?? ''),
+      })
+      void queryClient.invalidateQueries({
+        queryKey: ['global', 'platform', 'tenants'],
+      })
+    } catch (cause) {
+      setSubmitting(false)
+      setActionError(messageFor(cause))
+    }
+  }
+
   const availablePlans = (plans.data?.results ?? []).filter(
     (p) => p.id !== subscription?.plan.id,
   )
@@ -196,8 +225,20 @@ export function TenantDetailPage() {
 
   return (
     <div>
-      <h2 className="text-h2 text-primary">{data.name}</h2>
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-h2 text-primary">{data.name}</h2>
+        <Badge variant={data.is_active ? 'success' : 'danger'}>
+          {data.is_active ? 'Active' : 'Suspended'}
+        </Badge>
+      </div>
       <p className="mt-1 font-mono text-caption text-secondary">{data.slug}</p>
+
+      {!data.is_active && (
+        <Alert variant="warning" className="mt-4 max-w-[42rem]">
+          This workspace is suspended. Its members are refused at sign-in to
+          this tenant; billing is untouched and the subscription is unchanged.
+        </Alert>
+      )}
 
       <DataList
         className="mt-6 max-w-[42rem]"
@@ -304,6 +345,80 @@ export function TenantDetailPage() {
           </div>
         </div>
       )}
+
+      {isRoot && (
+        <div className="mt-6 max-w-[42rem] rounded-md border border-subtle bg-raised p-4">
+          <p className="text-label font-medium text-primary">Workspace access</p>
+          <p className="mt-1 text-caption text-secondary">
+            Root-only. Suspending blocks every member of this tenant at the
+            authentication boundary. It changes no subscription, calls no
+            payment gateway, and stops no billing — that is a separate
+            decision.
+          </p>
+          <div className="mt-4">
+            <Button
+              size="sm"
+              variant={data.is_active ? 'danger' : 'secondary'}
+              onClick={() => {
+                setActionError(null)
+                setSuspendOpen(true)
+              }}
+            >
+              {data.is_active ? 'Suspend workspace' : 'Reactivate workspace'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Modal
+        open={suspendOpen}
+        onClose={() => setSuspendOpen(false)}
+        title={data.is_active ? 'Suspend workspace' : 'Reactivate workspace'}
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setSuspendOpen(false)}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={data.is_active ? 'danger' : 'primary'}
+              loading={submitting}
+              onClick={() => setTenantActive(!data.is_active)}
+            >
+              {data.is_active ? 'Suspend' : 'Reactivate'}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          {actionError && <Alert variant="danger">{actionError}</Alert>}
+          <p className="text-body text-secondary">
+            {data.is_active ? (
+              <>
+                Every member of{' '}
+                <strong className="text-primary">{data.name}</strong> —{' '}
+                {data.memberships.length === 1
+                  ? '1 account'
+                  : `${data.memberships.length} accounts`}{' '}
+                — will be refused access to this workspace until it is
+                reactivated. They can still sign in and see their other
+                workspaces.
+              </>
+            ) : (
+              <>
+                <strong className="text-primary">{data.name}</strong> becomes
+                reachable again for its members immediately.
+              </>
+            )}
+          </p>
+          <p className="text-caption text-secondary">
+            No subscription, invoice or gateway state changes either way.
+          </p>
+        </div>
+      </Modal>
 
       <div className="mt-10">
         <h3 className="text-h2 text-primary">Members</h3>

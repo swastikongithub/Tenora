@@ -1,7 +1,13 @@
 /**
  * /admin/tenants — every tenant, with `status`/`plan`/`search` filters and a
- * link to each detail page. Read-only (no suspend control — that's Phase 5,
- * Root-tier).
+ * link to each detail page.
+ *
+ * Read-only: the suspend/reactivate control is Root-tier and lives on the
+ * tenant's own detail page, where the operator can see who and what they are
+ * taking offline. Since Phase 5 this list does show WHICH tenants are
+ * suspended — a workspace column distinct from the subscription-status one,
+ * because "suspended by an operator" and "past due at the gateway" are
+ * different facts and collapsing them into one badge would hide both.
  */
 
 import { useState } from 'react'
@@ -23,6 +29,7 @@ interface PlatformTenant {
   name: string
   slug: string
   created_at: string
+  is_active: boolean
   member_count: number
   subscription: { plan_name: string; status: SubscriptionStatus } | null
 }
@@ -61,6 +68,15 @@ const columns: Array<Column<PlatformTenant>> = [
     ),
   },
   { key: 'slug', header: 'Slug', render: (t) => <span className="font-mono">{t.slug}</span> },
+  {
+    key: 'is_active',
+    header: 'Workspace',
+    render: (t) => (
+      <Badge variant={t.is_active ? 'success' : 'danger'}>
+        {t.is_active ? 'Active' : 'Suspended'}
+      </Badge>
+    ),
+  },
   { key: 'member_count', header: 'Members', numeric: true, render: (t) => t.member_count },
   { key: 'plan', header: 'Plan', render: (t) => t.subscription?.plan_name ?? '—' },
   {

@@ -20,6 +20,13 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
     tenant with none — using the same `except Subscription.DoesNotExist`
     idiom CurrentSubscriptionView already relies on, not a hasattr shortcut
     that would swallow the real exception class.
+
+    `is_active` joined the row in Phase 5: once a tenant can be suspended, an
+    operator scanning the list needs to see which ones are — otherwise the
+    only place that fact appears is the detail page, one tenant at a time.
+    The field itself is not new (it is on the model, and the tenant detail
+    read has always returned it via TenantSerializer); only its presence in
+    this list row is.
     """
 
     member_count = serializers.IntegerField(read_only=True)
@@ -27,7 +34,15 @@ class PlatformTenantSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Tenant
-        fields = ["id", "name", "slug", "created_at", "member_count", "subscription"]
+        fields = [
+            "id",
+            "name",
+            "slug",
+            "created_at",
+            "is_active",
+            "member_count",
+            "subscription",
+        ]
 
     def get_subscription(self, tenant):
         try:
@@ -380,3 +395,18 @@ class PlatformUserRoleUpdateSerializer(serializers.Serializer):
         if not attrs:
             raise serializers.ValidationError("Provide at least one field to change.")
         return attrs
+
+
+class PlatformTenantSuspensionSerializer(serializers.Serializer):
+    """
+    Input only — PATCH /api/platform/tenants/detail/?id=, Root-tier (Phase 5).
+
+    Exactly one field, required. A plain `Serializer` so nothing else in the
+    body can bind: this endpoint decides whether a tenant may be used at all,
+    and must never become a general-purpose tenant editor. `name` and `slug`
+    are deliberately absent — a slug is how a tenant is addressed, and a
+    control-plane action that could rename one is a different capability from
+    suspending one.
+    """
+
+    is_active = serializers.BooleanField()

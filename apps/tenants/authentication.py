@@ -73,6 +73,31 @@ GLOBAL_PATHS = frozenset({
 })
 
 
+class TenantSuspended(APIException):
+    """
+    The tenant named by X-Tenant-ID exists, the caller is genuinely a member,
+    and the tenant has been suspended by a platform operator
+    (docs/operator-control-plane-spec.md §F, Phase 5).
+
+    403, not 401: the caller's credentials are fine and re-authenticating would
+    change nothing, which is exactly what 401 would invite them to try. It sits
+    beside the existing PermissionDenied for "not a member" — both are
+    authorization answers about this tenant, not about this token.
+
+    Deliberately a DISTINCT, honest message rather than reusing "you are not a
+    member of this tenant". The two are different facts, and the member of a
+    suspended workspace is not an attacker to be misled — they are a customer
+    who needs to know why their workspace stopped responding. Nothing about
+    who suspended it, when, or why is disclosed.
+    """
+
+    status_code = 403
+    default_detail = (
+        "This workspace has been suspended. Contact support for assistance."
+    )
+    default_code = "tenant_suspended"
+
+
 class TenantHeaderRequired(APIException):
     """
     A missing or malformed X-Tenant-ID is a client request error, not
@@ -133,6 +158,32 @@ class TenantJWTAuthentication(JWTAuthentication):
             raise PermissionDenied(
                 "You are not a member of this tenant.", code="not_a_member"
             )
+
+        # Operator Control Plane Phase 5 (docs/operator-control-plane-spec.md
+        # §F) — the ONE check this design adds to this file, sequenced last
+        # and reviewed on its own, exactly as §G's migration strategy required.
+        #
+        # Placed HERE, after membership resolution, on purpose:
+        #
+        #   - It must not run before the membership check, or a non-member
+        #     could probe whether an arbitrary tenant id is suspended — a
+        #     small cross-tenant information leak in the one file this
+        #     codebase treats as its most security-sensitive.
+        #   - It must run before request.tenant is attached, so no view can
+        #     ever see a resolved tenant context for a suspended tenant. The
+        #     invariant this class exists to provide ("if a tenant-scoped
+        #     request reaches the view, request.tenant is resolved and
+        #     trustworthy") now also means "and that tenant is not suspended".
+        #
+        # `membership.tenant` is already loaded by the select_related above, so
+        # this adds no query. The whole enforcement is one attribute read.
+        #
+        # Every platform-operator path is untouched: /api/platform/... is in
+        # GLOBAL_PATHS, so this code never runs for it. Suspending a customer
+        # cannot lock an operator out of the control plane that would
+        # un-suspend them (§5.4).
+        if not membership.tenant.is_active:
+            raise TenantSuspended()
 
         # DRF's Request.__getattr__ proxies any attribute not found
         # directly on the Request object to the wrapped HttpRequest

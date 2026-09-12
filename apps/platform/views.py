@@ -76,6 +76,7 @@ from apps.platform.serializers import (
     PlatformPlanUpdateSerializer,
     PlatformReconciliationDiscrepancySerializer,
     PlatformTenantSerializer,
+    PlatformTenantSuspensionSerializer,
     PlatformUserDetailSerializer,
     PlatformUserRoleUpdateSerializer,
     PlatformUserSerializer,
@@ -87,6 +88,7 @@ from apps.platform.services import (
     LastRootProtected,
     PlanLocked,
     PlanManagementService,
+    TenantSuspensionService,
     UserRoleService,
     resolve_tenants_for_external_subscription_ids,
 )
@@ -164,17 +166,48 @@ class PlatformTenantListView(APIView):
 
 class PlatformTenantDetailView(APIView):
     """
-    GET /api/platform/tenants/detail/?id=<uuid> — one tenant's full operator
-    view: the tenant row, its memberships, its subscription (or null), and
-    its most recent normalized webhook events. A malformed or unmatched id is
-    404 — the boundary (non-staff -> 403) is checked before any lookup runs,
+    GET /api/platform/tenants/detail/?id=<uuid> — Staff-tier: one tenant's full
+    operator view: the tenant row, its memberships, its subscription (or null),
+    and its most recent normalized webhook events. A malformed or unmatched id
+    is 404 — the boundary (non-staff -> 403) is checked before any lookup runs,
     so this endpoint never needs the tenant-facing "404, never 403" rule
     (that rule protects against confirming an object exists to a caller who
     might not be allowed to know; a platform-staff caller is always allowed
     to know).
+
+    PATCH /api/platform/tenants/detail/?id=<uuid> — Phase 5, ROOT-tier ONLY
+    (docs/operator-control-plane-spec.md §C): `{is_active}`, suspend or
+    reactivate the whole tenant. Same one-path-two-tiers arrangement as the
+    user detail view, for the same reason.
+
+    Staff keeps full READ access to a suspended tenant — that is the point of
+    §5.4: suspending a customer must never blind the operators who have to
+    investigate it.
     """
 
-    permission_classes = [IsAuthenticated, IsPlatformStaff]
+    def get_permissions(self):
+        if self.request.method == "PATCH":
+            return [IsAuthenticated(), IsPlatformRoot()]
+        return [IsAuthenticated(), IsPlatformStaff()]
+
+    def patch(self, request):
+        tenant_id = parse_uuid_or_none(request.query_params.get("id"))
+        if tenant_id is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            tenant = Tenant.objects.get(pk=tenant_id)
+        except Tenant.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = PlatformTenantSuspensionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        tenant = TenantSuspensionService.set_active(
+            actor=request.user,
+            tenant=tenant,
+            is_active=serializer.validated_data["is_active"],
+        )
+        return Response(TenantSerializer(tenant).data, status=status.HTTP_200_OK)
 
     def get(self, request):
         tenant_id = parse_uuid_or_none(request.query_params.get("id"))
