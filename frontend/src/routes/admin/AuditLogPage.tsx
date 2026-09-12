@@ -49,6 +49,19 @@ const ACTIONS = [
 
 const TARGET_TYPES = ["Subscription", "WebhookEvent", "Tenant"]
 
+/**
+ * A null actor has two different meanings, and an unlabelled dash for both
+ * would hide one of them. `AuditEvent.actor` is SET_NULL, so a row can outlive
+ * the account that made it — and since Phase 6, a scheduled sweep writes rows
+ * with no actor at all because no human was involved (inventing a synthetic
+ * "system" account to fill the column would put a fake user in the audit
+ * trail). The target type is what separates the two.
+ */
+function actorLabel(event: AuditEventRow): string {
+  if (event.actor) return event.actor.email
+  return event.target_type === 'ScheduledTask' ? 'Scheduled' : '—'
+}
+
 const columns: Array<Column<AuditEventRow>> = [
   {
     key: 'created_at',
@@ -64,7 +77,7 @@ const columns: Array<Column<AuditEventRow>> = [
       </Badge>
     ),
   },
-  { key: 'actor', header: 'Actor', render: (e) => e.actor?.email ?? '—' },
+  { key: 'actor', header: 'Actor', render: (e) => actorLabel(e) },
   { key: 'action', header: 'Action', render: (e) => <span className="font-mono text-caption">{e.action}</span> },
   {
     key: 'target',
@@ -209,7 +222,7 @@ export function AuditLogPage() {
                   <Badge variant={e.is_critical ? 'danger' : 'neutral'}>
                     {e.is_critical ? 'Critical' : 'Observational'}
                   </Badge>
-                  <span>{e.actor?.email ?? '—'}</span>
+                  <span>{actorLabel(e)}</span>
                 </span>
               </>
             )}

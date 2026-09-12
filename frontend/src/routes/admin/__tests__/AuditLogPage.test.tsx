@@ -13,6 +13,7 @@ import {
   PLATFORM_AUDIT_EVENTS,
   platformAuditLogHandler,
   TENANT_A,
+  tenantsMeHandler,
   usersMeStaffHandler,
 } from '../../../test/fixtures'
 import { AuthProvider } from '../../../lib/auth'
@@ -33,8 +34,17 @@ function renderAt(path = '/admin/audit-log') {
   )
 }
 
+// `tenantsMeHandler` is not decoration: without it the navbar's tenant
+// switcher fails its own query and renders its own "Retry" button, so a test
+// that clicks a page-level Retry by role intermittently finds two. Stubbing
+// the shell's query makes that deterministic without changing what any
+// assertion below claims.
 beforeEach(() => {
-  server.use(...authHandlers(), platformAuditLogHandler())
+  server.use(
+    ...authHandlers(),
+    tenantsMeHandler([TENANT_A]),
+    platformAuditLogHandler(),
+  )
   // A separate, later .use() call — MSW resolves the first-matching handler
   // among ones added together, and authHandlers() already bundles a
   // non-staff /users/me/ handler; this later call must win.
@@ -236,5 +246,55 @@ describe('AuditLogPage', () => {
     renderAt()
     await screen.findByText(PLATFORM_AUDIT_EVENTS[0].summary)
     expect(tenantHeader).toBeNull()
+  })
+})
+
+describe('AuditLogPage — scheduled runs (Phase 6)', () => {
+  it('labels a machine-run entry rather than showing a bare dash', async () => {
+    server.use(
+      platformAuditLogHandler([
+        {
+          id: 'ae-sched',
+          actor: null,
+          action: 'scheduled.webhook_sweep',
+          target_type: 'ScheduledTask',
+          target_id: 'scheduled.webhook_sweep',
+          summary: 'Scheduled webhook sweep: 3 checked, 2 processed',
+          metadata: { total: 3, processed: 2, deferred: 1, failed: 0 },
+          is_critical: false,
+          created_at: '2026-03-05T00:00:00Z',
+        },
+      ]),
+    )
+    renderAt()
+
+    expect(
+      await screen.findByText('Scheduled webhook sweep: 3 checked, 2 processed'),
+    ).toBeInTheDocument()
+    // "Scheduled", not "—": a null actor on a scheduled run means no human was
+    // involved, which is a different fact from a deleted account.
+    expect(screen.getAllByText('Scheduled').length).toBeGreaterThan(0)
+  })
+
+  it('still shows a dash for a row whose actor account is gone', async () => {
+    server.use(
+      platformAuditLogHandler([
+        {
+          id: 'ae-orphan',
+          actor: null,
+          action: 'plan.created',
+          target_type: 'Plan',
+          target_id: 'plan-1',
+          summary: 'Created plan SCALE (Scale)',
+          metadata: {},
+          is_critical: true,
+          created_at: '2026-03-05T00:00:00Z',
+        },
+      ]),
+    )
+    renderAt()
+
+    await screen.findByText('Created plan SCALE (Scale)')
+    expect(screen.queryByText('Scheduled')).not.toBeInTheDocument()
   })
 })

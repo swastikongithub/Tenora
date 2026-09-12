@@ -14,6 +14,7 @@ import {
   platformPlanCreateErrorHandler,
   platformPlansHandler,
   TENANT_A,
+  tenantsMeHandler,
   usersMeStaffHandler,
 } from '../../../test/fixtures'
 import { AuthProvider } from '../../../lib/auth'
@@ -34,8 +35,13 @@ function renderAt(path = '/admin/plans') {
   )
 }
 
+// `tenantsMeHandler` is not decoration: without it the navbar's tenant
+// switcher fails its own query and renders its own "Retry" button, so a test
+// that clicks a page-level Retry by role intermittently finds two. Stubbing
+// the shell's query makes that deterministic without changing what any
+// assertion below claims.
 beforeEach(() => {
-  server.use(...authHandlers(), platformPlansHandler())
+  server.use(...authHandlers(), tenantsMeHandler([TENANT_A]), platformPlansHandler())
   server.use(usersMeStaffHandler())
 })
 

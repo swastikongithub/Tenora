@@ -100,7 +100,19 @@ class ProcessWebhookEventsTaskTests(ProcessingTestBase):
 
     def test_nothing_pending_is_a_clean_zero_result(self):
         result = sweep_task()
-        self.assertEqual(result, {"total": 0, "processed": 0, "deferred": 0, "failed": 0})
+        # `lock_skipped` joined every task result in Phase 6 (the overlap
+        # guard — docs/worker-scheduler-operations.md §3). The count keys are
+        # unchanged; this run took the lock, so the flag is False.
+        self.assertEqual(
+            result,
+            {
+                "lock_skipped": False,
+                "total": 0,
+                "processed": 0,
+                "deferred": 0,
+                "failed": 0,
+            },
+        )
 
 
 class MeterUsageTaskTests(UsageMeteringTestBase):
