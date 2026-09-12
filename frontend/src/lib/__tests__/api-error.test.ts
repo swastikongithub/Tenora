@@ -34,6 +34,20 @@ describe('ApiError.fromBody', () => {
     expect(err.message).toContain('X-Tenant-ID')
   })
 
+  it('treats a list-valued "code" as a field error, not as the DRF error code', () => {
+    // The operator plan form posts a field literally named `code`; DRF only
+    // ever emits its own error code as a string, so the two are separable by
+    // shape and a plan-code validation message must survive.
+    const err = ApiError.fromBody(400, 'Bad Request', {
+      code: ['A plan with this code already exists.'],
+    })
+    expect(err.fieldErrors).toEqual({
+      code: ['A plan with this code already exists.'],
+    })
+    expect(err.code).toBeUndefined()
+    expect(err.message).toBe('A plan with this code already exists.')
+  })
+
   it('falls back to status text, then a generic string, for a non-DRF body', () => {
     expect(ApiError.fromBody(500, 'Internal Server Error', null).message).toBe(
       'Internal Server Error',

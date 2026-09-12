@@ -22,6 +22,7 @@ describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
       '/api/platform/health/',
       '/api/platform/plans/',
       '/api/platform/plans/detail/',
+      '/api/platform/plans/sync/',
       '/api/platform/reconciliation-discrepancies/',
       '/api/platform/reconciliation/run/',
       '/api/platform/stats/',

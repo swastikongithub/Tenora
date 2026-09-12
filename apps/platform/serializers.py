@@ -1,3 +1,5 @@
+import re
+
 from rest_framework import serializers
 
 from apps.billing.models import Plan, ReconciliationDiscrepancy, Subscription, WebhookEvent
@@ -204,3 +206,124 @@ class PlatformAuditEventSerializer(serializers.ModelSerializer):
         if not obj.actor_id or obj.actor is None:
             return None
         return {"id": str(obj.actor_id), "email": obj.actor.email}
+
+
+# Operator-supplied plan identity/currency shapes. Format rules only — they
+# say nothing about what a plan may cost or how often it bills, which is the
+# operator's business decision, not this layer's.
+_PLAN_CODE_RE = re.compile(r"[A-Z0-9][A-Z0-9_-]*")
+_CURRENCY_RE = re.compile(r"[A-Z]{3}")
+
+
+def _clean_name(value):
+    name = value.strip()
+    if not name:
+        raise serializers.ValidationError("This field may not be blank.")
+    return name
+
+
+def _clean_code(value):
+    code = value.strip().upper()
+    if not _PLAN_CODE_RE.fullmatch(code):
+        raise serializers.ValidationError(
+            "Use letters, digits, underscores and hyphens only (e.g. PRO_ANNUAL)."
+        )
+    return code
+
+
+def _clean_currency(value):
+    currency = value.strip().upper()
+    if not _CURRENCY_RE.fullmatch(currency):
+        raise serializers.ValidationError(
+            "Use a three-letter ISO 4217 currency code (e.g. USD)."
+        )
+    return currency
+
+
+class PlatformPlanCreateSerializer(serializers.Serializer):
+    """
+    Input only — POST /api/platform/plans/ (Phase 3).
+
+    A plain `Serializer`, not a `ModelSerializer`, for the same reason
+    `RegisterSerializer` is (apps.users.serializers): unknown body keys are
+    silently dropped rather than bound, so a client cannot reach a field this
+    endpoint does not offer. That matters concretely here — `external_plan_id`
+    and `is_active` are NOT accepted at creation. A plan is always created
+    unsynced (provisioning it at the gateway is a separate, explicit operator
+    action, so creating a plan never has an external side effect) and always
+    created active.
+
+    `code` uniqueness is checked against the database so a duplicate reads as a
+    clean field error instead of an IntegrityError; the UNIQUE constraint on
+    the column remains the real guarantee under concurrency, and the view
+    catches that collision too (CLAUDE.md: "the DB constraint — not a
+    pre-check — is the real concurrency guarantee").
+    """
+
+    name = serializers.CharField(max_length=100)
+    code = serializers.CharField(max_length=50)
+    price_cents = serializers.IntegerField(min_value=0)
+    currency = serializers.CharField(min_length=3, max_length=3)
+    interval = serializers.ChoiceField(choices=Plan.Interval.choices)
+
+    def validate_name(self, value):
+        return _clean_name(value)
+
+    def validate_currency(self, value):
+        return _clean_currency(value)
+
+    def validate_code(self, value):
+        code = _clean_code(value)
+        if Plan.objects.filter(code=code).exists():
+            raise serializers.ValidationError("A plan with this code already exists.")
+        return code
+
+
+class PlatformPlanUpdateSerializer(serializers.Serializer):
+    """
+    Input only — PATCH /api/platform/plans/detail/?id= (Phase 3).
+
+    Deliberately accepts the money/identity fields (`price_cents`, `currency`,
+    `interval`, `code`) even though a synced plan forbids changing them.
+    Dropping them here instead would make an attempt to change a locked plan's
+    price look like it succeeded; accepting them lets
+    `PlanManagementService.update_plan` answer the real question — is THIS plan
+    locked — and reject naming the offending fields. On an unsynced plan they
+    are legitimately editable, which is exactly the spec's rule: "before
+    `external_plan_id` is set, every field on a `Plan` may be edited freely".
+
+    `external_plan_id` itself is not a field here, on any plan, in any state:
+    the platform sets it exactly once, from a gateway sync, and nothing else
+    may ever assign or replace it.
+
+    Takes the plan being edited as `instance` so the `code` uniqueness check
+    can exclude that row. An empty body is a client mistake, not a silent
+    no-op, so it is rejected.
+    """
+
+    name = serializers.CharField(max_length=100, required=False)
+    code = serializers.CharField(max_length=50, required=False)
+    price_cents = serializers.IntegerField(min_value=0, required=False)
+    currency = serializers.CharField(min_length=3, max_length=3, required=False)
+    interval = serializers.ChoiceField(choices=Plan.Interval.choices, required=False)
+    is_active = serializers.BooleanField(required=False)
+
+    def validate_name(self, value):
+        return _clean_name(value)
+
+    def validate_currency(self, value):
+        return _clean_currency(value)
+
+    def validate_code(self, value):
+        code = _clean_code(value)
+        clashes = Plan.objects.filter(code=code)
+        if self.instance is not None:
+            clashes = clashes.exclude(pk=self.instance.pk)
+        if clashes.exists():
+            raise serializers.ValidationError("A plan with this code already exists.")
+        return code
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Provide at least one field to change.")
+        return attrs

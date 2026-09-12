@@ -33,10 +33,11 @@ observational ones (the three fallback sweeps) use
 AuditService.record_observational after the sweep has already run.
 """
 
+import logging
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
@@ -68,18 +69,27 @@ from apps.platform.pagination import PlatformPageNumberPagination
 from apps.platform.permissions import IsPlatformStaff
 from apps.platform.serializers import (
     PlatformAuditEventSerializer,
+    PlatformPlanCreateSerializer,
     PlatformPlanSerializer,
+    PlatformPlanUpdateSerializer,
     PlatformReconciliationDiscrepancySerializer,
     PlatformTenantSerializer,
     PlatformUserDetailSerializer,
     PlatformUserSerializer,
     PlatformWebhookEventSerializer,
 )
-from apps.platform.services import AuditService, resolve_tenants_for_external_subscription_ids
+from apps.platform.services import (
+    AuditService,
+    PlanLocked,
+    PlanManagementService,
+    resolve_tenants_for_external_subscription_ids,
+)
 from apps.platform.utils import parse_uuid_or_none
 from apps.tenants.models import Membership, Tenant
 from apps.tenants.serializers import MembershipSerializer, TenantSerializer
 from apps.users.models import User
+
+logger = logging.getLogger(__name__)
 
 # Marks the "tenant has no subscription at all" bucket in the status
 # breakdown. Not a Subscription.Status value — deliberately outside that
@@ -333,14 +343,49 @@ class PlatformHealthView(APIView):
         )
 
 
+def _plan_response(plan, http_status=status.HTTP_200_OK):
+    """One plan, re-read through the same annotation the read endpoints use, so
+    a mutation's response body is byte-identical in shape to a GET's."""
+    annotated = Plan.objects.annotate(
+        subscriber_count=Count("subscriptions", distinct=True)
+    ).get(pk=plan.pk)
+    return Response(PlatformPlanSerializer(annotated).data, status=http_status)
+
+
 class PlatformPlanListView(APIView):
     """
     GET /api/platform/plans/ — every Plan, active or not (unlike the
     tenant-facing GET /api/plans/, which only ever returns active plans).
     `subscriber_count` is a real annotation, not a Python loop.
+
+    POST /api/platform/plans/ — Phase 3: create a plan. Staff-tier (docs
+    /operator-control-plane-spec.md §B: plan management is routine operator
+    work, not Root). The write itself is PlanManagementService.create_plan,
+    which owns its own transaction and its own critical audit row — this view
+    validates input and shapes the response, nothing else (CLAUDE.md: "all
+    mutations go through services").
     """
 
     permission_classes = [IsAuthenticated, IsPlatformStaff]
+
+    def post(self, request):
+        serializer = PlatformPlanCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            plan = PlanManagementService.create_plan(
+                actor=request.user, **serializer.validated_data
+            )
+        except IntegrityError:
+            # The UNIQUE(code) constraint, not the serializer's pre-check, is
+            # the real guarantee — two concurrent creates of the same code
+            # both pass validation and one loses here. Caught OUTSIDE the
+            # service's own atomic block (CLAUDE.md), which has already rolled
+            # its savepoint back, so this transaction stays usable.
+            return Response(
+                {"code": ["A plan with this code already exists."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return _plan_response(plan, status.HTTP_201_CREATED)
 
     def get(self, request):
         plans = Plan.objects.annotate(
@@ -363,10 +408,31 @@ class PlatformPlanListView(APIView):
 
 
 class PlatformPlanDetailView(APIView):
-    """GET /api/platform/plans/detail/?id=<uuid> — one plan, including the
-    fields the tenant-facing plan list deliberately omits."""
+    """
+    GET /api/platform/plans/detail/?id=<uuid> — one plan, including the
+    fields the tenant-facing plan list deliberately omits.
+
+    PATCH /api/platform/plans/detail/?id=<uuid> — Phase 3: edit a plan, which
+    includes archiving it (`is_active=false`). Staff-tier. There is no DELETE
+    here or anywhere else in this API (spec §B): a Plan is referenced by
+    subscriptions, checkouts and proration records, so archive is the only
+    honest retirement, and the database would refuse the delete anyway.
+
+    The lock rule — once `external_plan_id` is set only `name` and `is_active`
+    may change — lives in PlanManagementService.update_plan, not here: it is a
+    business rule, and it needs the plan instance to answer.
+    """
 
     permission_classes = [IsAuthenticated, IsPlatformStaff]
+
+    def _get_plan(self, request):
+        plan_id = parse_uuid_or_none(request.query_params.get("id"))
+        if plan_id is None:
+            return None
+        try:
+            return Plan.objects.get(pk=plan_id)
+        except Plan.DoesNotExist:
+            return None
 
     def get(self, request):
         plan_id = parse_uuid_or_none(request.query_params.get("id"))
@@ -379,6 +445,97 @@ class PlatformPlanDetailView(APIView):
         except Plan.DoesNotExist:
             return Response(status=status.HTTP_404_NOT_FOUND)
         return Response(PlatformPlanSerializer(plan).data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        plan = self._get_plan(request)
+        if plan is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = PlatformPlanUpdateSerializer(instance=plan, data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            plan = PlanManagementService.update_plan(
+                actor=request.user, plan=plan, changes=dict(serializer.validated_data)
+            )
+        except PlanLocked as exc:
+            # One field error per locked field the caller tried to change, so
+            # the UI can mark the exact inputs — not a single opaque detail.
+            return Response(
+                {field: [str(exc)] for field in exc.fields},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except IntegrityError:
+            return Response(
+                {"code": ["A plan with this code already exists."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return _plan_response(plan)
+
+
+class PlatformPlanSyncView(APIView):
+    """
+    POST /api/platform/plans/sync/?id=<uuid> — Phase 3: provision this plan at
+    the configured payment gateway and store the id it returns. Staff-tier.
+
+    Provider-neutral end to end: this view names no provider, reaches no SDK,
+    and returns no provider payload. It calls PlanManagementService.sync_plan,
+    which calls the REUSED PlanSyncService.sync_plan, which calls
+    get_gateway().create_plan() — the adapter boundary
+    (docs/payment-gateway-adapter-spec.md §1). The response carries the
+    external plan id and whether this call was the one that created it.
+
+    Already synced is a 200 no-op (`created: false`), not an error and not a
+    second gateway call: `external_plan_id` is immutable once set, so a
+    double-clicked button cannot provision a second gateway plan.
+
+    A gateway failure is a 502 with a fixed, generic message — the provider's
+    own error text can carry request/response detail that has no business in
+    an operator's browser, so it goes to the application log instead, and an
+    observational audit row records that the attempt failed.
+    """
+
+    permission_classes = [IsAuthenticated, IsPlatformStaff]
+
+    def post(self, request):
+        plan_id = parse_uuid_or_none(request.query_params.get("id"))
+        if plan_id is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        try:
+            plan = Plan.objects.get(pk=plan_id)
+        except Plan.DoesNotExist:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            plan, created = PlanManagementService.sync_plan(
+                actor=request.user, plan=plan
+            )
+        except Exception as exc:  # noqa: BLE001 — see docstring
+            # Deliberately broad: an adapter may raise anything its provider's
+            # SDK raises (a transport error, an auth error, a provider 4xx),
+            # and none of those should reach the operator as a 500 with a
+            # traceback or as the provider's own message.
+            logger.exception(
+                "platform: gateway plan sync failed — plan=%s", plan.code
+            )
+            PlanManagementService.record_sync_failure(
+                actor=request.user, plan=plan, exc=exc
+            )
+            return Response(
+                {
+                    "detail": "The payment gateway rejected or could not "
+                    "complete this sync. Check the service logs."
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        body = PlatformPlanSerializer(
+            Plan.objects.annotate(
+                subscriber_count=Count("subscriptions", distinct=True)
+            ).get(pk=plan.pk)
+        ).data
+        body["created"] = created
+        return Response(body, status=status.HTTP_200_OK)
 
 
 # The gateway-neutral vocabulary a "tenant" query filter must resolve

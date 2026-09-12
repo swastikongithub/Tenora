@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
@@ -11,6 +11,7 @@ import {
   authHandlers,
   paginated,
   PLATFORM_PLANS,
+  platformPlanCreateErrorHandler,
   platformPlansHandler,
   TENANT_A,
   usersMeStaffHandler,
@@ -104,5 +105,129 @@ describe('PlansPage', () => {
     renderAt()
     await screen.findByText(PLATFORM_PLANS[0].name)
     expect(tenantHeader).toBeNull()
+  })
+})
+
+describe('PlansPage — create (Phase 3)', () => {
+  it('sends nothing until the form is submitted', async () => {
+    let posts = 0
+    server.use(
+      http.post(apiUrl('/platform/plans/'), () => {
+        posts += 1
+        return HttpResponse.json(PLATFORM_PLANS[0], { status: 201 })
+      }),
+    )
+    renderAt()
+    await screen.findByText(PLATFORM_PLANS[0].name)
+
+    await userEvent.click(screen.getByRole('button', { name: 'New plan' }))
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
+    expect(posts).toBe(0)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(posts).toBe(0)
+  })
+
+  it('posts the form values and closes on success', async () => {
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.post(apiUrl('/platform/plans/'), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(PLATFORM_PLANS[0], { status: 201 })
+      }),
+    )
+    renderAt()
+    await screen.findByText(PLATFORM_PLANS[0].name)
+
+    await userEvent.click(screen.getByRole('button', { name: 'New plan' }))
+    await userEvent.type(screen.getByLabelText('Name'), 'Scale')
+    await userEvent.type(screen.getByLabelText('Code'), 'SCALE')
+    await userEvent.type(screen.getByLabelText('Price (minor units)'), '19900')
+    await userEvent.click(screen.getByRole('button', { name: 'Create plan' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(body).toMatchObject({
+      name: 'Scale',
+      code: 'SCALE',
+      price_cents: 19900,
+      currency: 'USD',
+      interval: 'MONTHLY',
+    })
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
+  })
+
+  it('sends price as integer minor units, never a float', async () => {
+    let body: Record<string, unknown> | null = null
+    server.use(
+      http.post(apiUrl('/platform/plans/'), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json(PLATFORM_PLANS[0], { status: 201 })
+      }),
+    )
+    renderAt()
+    await screen.findByText(PLATFORM_PLANS[0].name)
+
+    await userEvent.click(screen.getByRole('button', { name: 'New plan' }))
+    await userEvent.type(screen.getByLabelText('Name'), 'Scale')
+    await userEvent.type(screen.getByLabelText('Code'), 'SCALE')
+    await userEvent.type(screen.getByLabelText('Price (minor units)'), '2900')
+    await userEvent.click(screen.getByRole('button', { name: 'Create plan' }))
+
+    await waitFor(() => expect(body).not.toBeNull())
+    expect(Number.isInteger((body as Record<string, unknown>).price_cents)).toBe(
+      true,
+    )
+  })
+
+  it('keeps the form open and shows the field error the server returned', async () => {
+    server.use(
+      platformPlanCreateErrorHandler('code', 'A plan with this code already exists.'),
+    )
+    renderAt()
+    await screen.findByText(PLATFORM_PLANS[0].name)
+
+    await userEvent.click(screen.getByRole('button', { name: 'New plan' }))
+    await userEvent.type(screen.getByLabelText('Name'), 'Pro')
+    await userEvent.type(screen.getByLabelText('Code'), 'PRO')
+    await userEvent.type(screen.getByLabelText('Price (minor units)'), '100')
+    await userEvent.click(screen.getByRole('button', { name: 'Create plan' }))
+
+    expect(
+      await screen.findByText('A plan with this code already exists.'),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('will not submit an incomplete form', async () => {
+    renderAt()
+    await screen.findByText(PLATFORM_PLANS[0].name)
+
+    await userEvent.click(screen.getByRole('button', { name: 'New plan' }))
+    expect(screen.getByRole('button', { name: 'Create plan' })).toBeDisabled()
+
+    await userEvent.type(screen.getByLabelText('Name'), 'Scale')
+    expect(screen.getByRole('button', { name: 'Create plan' })).toBeDisabled()
+  })
+
+  it('never sends X-Tenant-ID on the create call', async () => {
+    let tenantHeader: string | null = 'unset'
+    server.use(
+      http.post(apiUrl('/platform/plans/'), ({ request }) => {
+        tenantHeader = request.headers.get('x-tenant-id')
+        return HttpResponse.json(PLATFORM_PLANS[0], { status: 201 })
+      }),
+    )
+    renderAt()
+    await screen.findByText(PLATFORM_PLANS[0].name)
+
+    await userEvent.click(screen.getByRole('button', { name: 'New plan' }))
+    await userEvent.type(screen.getByLabelText('Name'), 'Scale')
+    await userEvent.type(screen.getByLabelText('Code'), 'SCALE')
+    await userEvent.type(screen.getByLabelText('Price (minor units)'), '100')
+    await userEvent.click(screen.getByRole('button', { name: 'Create plan' }))
+
+    await waitFor(() => expect(tenantHeader).toBeNull())
   })
 })

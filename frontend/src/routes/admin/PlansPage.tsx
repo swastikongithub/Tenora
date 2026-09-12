@@ -1,19 +1,28 @@
 /**
- * /admin/plans — docs/operator-control-plane-spec.md §D. Read-only in Phase
- * 1: every plan (active or not, unlike the tenant-facing plan list), with
- * `is_active`/search filters and a link to each detail page. No create/
- * edit/archive controls here — those are Phase 3.
+ * /admin/plans — docs/operator-control-plane-spec.md §D: every plan (active or
+ * not, unlike the tenant-facing plan list), with `is_active`/search filters
+ * and a link to each detail page.
+ *
+ * Phase 3 adds the one mutation that belongs on a list page — creating a plan.
+ * Edit, archive and gateway sync act on a specific plan and live on its detail
+ * page. Creation is confirm-before-mutate in the same sense every other
+ * mutating control here is: nothing is sent until the form is submitted, and
+ * the modal stays open showing the server's own field errors on failure.
  */
 
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import { Alert, Badge, Button, Input, Skeleton, Table } from '../../components'
 import type { Column } from '../../components'
 import { apiClient } from '../../lib/api-client'
+import { ApiError } from '../../lib/api-error'
+import type { FieldErrors } from '../../lib/api-error'
 import { formatMoney } from '../../lib/format'
 import { queryKeys } from '../../lib/query-keys'
+import { PlanFormModal } from './PlanFormModal'
+import type { PlanFormValues } from './PlanFormModal'
 import { toSearchParams } from './query-params'
 
 interface PlatformPlan {
@@ -80,8 +89,13 @@ const columns: Array<Column<PlatformPlan>> = [
 ]
 
 export function PlansPage() {
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [isActive, setIsActive] = useState<'' | 'true' | 'false'>('')
+  const [createOpen, setCreateOpen] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
 
   const params = { search: search || undefined, is_active: isActive || undefined }
   const plans = useQuery({
@@ -92,9 +106,47 @@ export function PlansPage() {
       ),
   })
 
+  async function createPlan(values: PlanFormValues) {
+    setSubmitting(true)
+    setCreateError(null)
+    setFieldErrors({})
+    try {
+      await apiClient.post('/platform/plans/', values)
+      setSubmitting(false)
+      setCreateOpen(false)
+      // Every cached plan list, under whatever filters — a new plan may or may
+      // not match the filters currently on screen, and the tenant-facing
+      // catalogue is a different key entirely (it is not affected: a new plan
+      // is created active, and that list refetches on its own schedule).
+      void queryClient.invalidateQueries({ queryKey: ['global', 'platform', 'plans'] })
+    } catch (cause) {
+      setSubmitting(false)
+      if (cause instanceof ApiError) {
+        setFieldErrors(cause.fieldErrors)
+        setCreateError(
+          Object.keys(cause.fieldErrors).length > 0 ? null : cause.message,
+        )
+      } else {
+        setCreateError('Something went wrong. Please try again.')
+      }
+    }
+  }
+
   return (
     <div>
-      <h2 className="text-h2 text-primary">Plans</h2>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h2 className="text-h2 text-primary">Plans</h2>
+        <Button
+          size="sm"
+          onClick={() => {
+            setCreateError(null)
+            setFieldErrors({})
+            setCreateOpen(true)
+          }}
+        >
+          New plan
+        </Button>
+      </div>
 
       <div className="mt-4 flex flex-wrap items-end gap-4">
         <Input
@@ -158,6 +210,16 @@ export function PlansPage() {
           <p className="text-body text-secondary">No plans match these filters.</p>
         )}
       </div>
+
+      <PlanFormModal
+        open={createOpen}
+        mode="create"
+        submitting={submitting}
+        error={createError}
+        fieldErrors={fieldErrors}
+        onSubmit={createPlan}
+        onClose={() => setCreateOpen(false)}
+      />
     </div>
   )
 }

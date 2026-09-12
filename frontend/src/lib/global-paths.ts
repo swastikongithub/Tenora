@@ -50,6 +50,11 @@ export const GLOBAL_PATHS: ReadonlySet<string> = new Set([
   '/api/platform/reconciliation/run/',
   '/api/platform/usage/run/',
   '/api/platform/audit-log/',
+  // Operator Control Plane, Phase 3 (docs/operator-control-plane-spec.md) —
+  // plan management. Create is a POST on '/api/platform/plans/' and edit a
+  // PATCH on '/api/platform/plans/detail/', both already listed above, so
+  // the gateway sync action is the only new entry.
+  '/api/platform/plans/sync/',
 ])
 
 /**

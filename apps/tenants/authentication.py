@@ -58,6 +58,11 @@ GLOBAL_PATHS = frozenset({
     "/api/platform/reconciliation/run/",
     "/api/platform/usage/run/",
     "/api/platform/audit-log/",
+    # Operator Control Plane, Phase 3 (docs/operator-control-plane-spec.md) —
+    # plan management. Create/edit reuse the two plan paths already listed
+    # above (POST on the list path, PATCH on the detail path), so the gateway
+    # sync action is the only new literal path this phase adds.
+    "/api/platform/plans/sync/",
 })
 
 

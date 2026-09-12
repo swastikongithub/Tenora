@@ -604,3 +604,69 @@ export const PLATFORM_AUDIT_EVENTS: PlatformAuditEventRow[] = [
 export const platformAuditLogHandler = (
   events: PlatformAuditEventRow[] = PLATFORM_AUDIT_EVENTS,
 ) => http.get(apiUrl('/platform/audit-log/'), () => HttpResponse.json(paginated(events)))
+
+
+// --- Operator Control Plane, Phase 3 (docs/operator-control-plane-spec.md) ---
+
+/** `POST /api/platform/plans/` — echoes back the created plan row. */
+export const platformPlanCreateHandler = (
+  plan: PlatformPlanRow = {
+    id: 'plan-new',
+    name: 'Scale',
+    code: 'SCALE',
+    price_cents: 19900,
+    currency: 'USD',
+    interval: 'MONTHLY',
+    is_active: true,
+    external_plan_id: null,
+    subscriber_count: 0,
+  },
+) =>
+  http.post(apiUrl('/platform/plans/'), () =>
+    HttpResponse.json(plan, { status: 201 }),
+  )
+
+/** `POST /api/platform/plans/` rejecting one field, the DRF shape. */
+export const platformPlanCreateErrorHandler = (
+  field: string,
+  message: string,
+  status = 400,
+) =>
+  http.post(apiUrl('/platform/plans/'), () =>
+    HttpResponse.json({ [field]: [message] }, { status }),
+  )
+
+/** `PATCH /api/platform/plans/detail/?id=` — echoes back the updated row. */
+export const platformPlanPatchHandler = (
+  plan: PlatformPlanRow = PLATFORM_PLANS[0],
+) => http.patch(apiUrl('/platform/plans/detail/'), () => HttpResponse.json(plan))
+
+export const platformPlanPatchErrorHandler = (field: string, message: string) =>
+  http.patch(apiUrl('/platform/plans/detail/'), () =>
+    HttpResponse.json({ [field]: [message] }, { status: 400 }),
+  )
+
+/** `POST /api/platform/plans/sync/?id=` — the plan row plus `created`. */
+export const platformPlanSyncHandler = (
+  plan: PlatformPlanRow = {
+    ...PLATFORM_PLANS[1],
+    external_plan_id: 'ext_plan_legacy',
+  },
+  created = true,
+) =>
+  http.post(apiUrl('/platform/plans/sync/'), () =>
+    HttpResponse.json({ ...plan, created }),
+  )
+
+/** `POST /api/platform/plans/sync/?id=` failing at the gateway (502). */
+export const platformPlanSyncErrorHandler = (status = 502) =>
+  http.post(apiUrl('/platform/plans/sync/'), () =>
+    HttpResponse.json(
+      {
+        detail:
+          'The payment gateway rejected or could not complete this sync. ' +
+          'Check the service logs.',
+      },
+      { status },
+    ),
+  )

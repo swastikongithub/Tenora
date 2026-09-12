@@ -46,7 +46,14 @@ export class ApiError extends Error {
 
       const fieldErrors: FieldErrors = {}
       for (const [key, value] of Object.entries(record)) {
-        if (key === 'detail' || key === 'code') continue
+        // `code` is reserved for DRF's error CODE — but only when it is a
+        // string, which is the only shape DRF ever emits it in. A `code` whose
+        // value is a list is an ordinary serializer field error for a field
+        // that happens to be named "code" (the operator plan form has exactly
+        // such a field), and skipping it would silently drop the one message
+        // that says what was wrong.
+        if (key === 'detail') continue
+        if (key === 'code' && typeof value === 'string') continue
         if (Array.isArray(value)) {
           fieldErrors[key] = value.map(String)
         } else if (typeof value === 'string') {

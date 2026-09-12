@@ -28,6 +28,7 @@ from apps.platform.views import (
     PlatformHealthView,
     PlatformPlanDetailView,
     PlatformPlanListView,
+    PlatformPlanSyncView,
     PlatformReconciliationDiscrepancyListView,
     PlatformReconciliationRunView,
     PlatformStatsView,
@@ -101,6 +102,15 @@ urlpatterns = [
         "api/platform/plans/detail/",
         PlatformPlanDetailView.as_view(),
         name="platform_plan_detail",
+    ),
+    # --- Operator Control Plane, Phase 3 (docs/operator-control-plane-spec.md) ---
+    # Plan management. Create is POST on the existing list path and edit is
+    # PATCH on the existing detail path, so Phase 3 adds exactly ONE new
+    # literal path here (and one to GLOBAL_PATHS): the gateway sync action.
+    path(
+        "api/platform/plans/sync/",
+        PlatformPlanSyncView.as_view(),
+        name="platform_plan_sync",
     ),
     path(
         "api/platform/tenants/detail/",
