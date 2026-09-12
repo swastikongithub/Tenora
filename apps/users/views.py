@@ -15,6 +15,7 @@ from apps.users.serializers import (
     UserSerializer,
     VerifyEmailSerializer,
 )
+from apps.users.email_delivery import EmailDeliveryError
 from apps.users.services import (
     EmailAlreadyRegistered,
     EmailVerificationService,
@@ -71,8 +72,33 @@ class RegisterView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # The account exists the moment registration succeeds (spec §4.8) —
+        # a deliberate, pre-existing invariant (see RegisterPage.tsx's own
+        # docstring on the frontend) that this change does not reverse.
+        # issue_token()'s DB write is not rolled back if the email below
+        # fails to send: doing so would mean a registration whose only
+        # problem was an email provider hiccup silently un-registers the
+        # account, which is worse than leaving a valid, still-usable
+        # verification token in place for the client to retry via
+        # /api/auth/resend-verification/.
         raw_token = EmailVerificationService.issue_token(user)
-        EmailVerificationService.send_verification_email(user, raw_token)
+        try:
+            EmailVerificationService.send_verification_email(user, raw_token)
+        except EmailDeliveryError:
+            # Never claim success (a 201) when delivery genuinely failed —
+            # unlike ResendVerificationView, register operates on the email
+            # address the caller themselves just supplied, so there is no
+            # account-enumeration concern in surfacing this distinctly.
+            return Response(
+                {
+                    "detail": (
+                        "Your account was created, but we couldn't send the "
+                        "verification email. Use the resend option to try "
+                        "again."
+                    )
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
 
         return Response(UserSerializer(user).data, status=status.HTTP_201_CREATED)
 

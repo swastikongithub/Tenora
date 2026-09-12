@@ -170,6 +170,38 @@ DEFAULT_FROM_EMAIL = os.environ.get(
 # backend's. Docker Compose / production deployments override this.
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5173")
 
+# auth-production-readiness spec, the Brevo fix: Render's Free plan (this
+# project's production host) blocks outbound SMTP on ports 25/465/587, so
+# the EMAIL_BACKEND/EMAIL_HOST/... settings above cannot deliver mail from
+# production no matter what SMTP provider they point at — without paying to
+# upgrade the plan, which this project deliberately doesn't do. EMAIL_PROVIDER
+# picks which apps.users.email_delivery adapter EmailVerificationService uses
+# at runtime, independent of EMAIL_BACKEND above:
+#   "django" (default) — the existing console/SMTP-via-EMAIL_BACKEND path
+#                         above. Safe locally and in the test suite: no
+#                         credentials, no network access, nothing changes
+#                         about it here.
+#   "brevo"             — sends over Brevo's HTTPS transactional email API
+#                         instead (apps/users/email_delivery/brevo.py),
+#                         bypassing EMAIL_BACKEND/SMTP entirely. Opt-in only
+#                         — sets nothing by default, so an existing
+#                         deployment that hasn't set this is unaffected.
+EMAIL_PROVIDER = os.environ.get("EMAIL_PROVIDER", "django")
+# Never logged, never included in any exception message or API response —
+# see apps/users/email_delivery/brevo.py, the only module that reads this.
+BREVO_API_KEY = os.environ.get("BREVO_API_KEY", "")
+DEFAULT_FROM_NAME = os.environ.get("DEFAULT_FROM_NAME", "Tenora")
+if EMAIL_PROVIDER == "brevo" and not (BREVO_API_KEY and DEFAULT_FROM_EMAIL):
+    # Fail closed, at process start — the same discipline as the TLS/SSL
+    # guard above. A deployment that opts into Brevo but forgot its API key
+    # or sender address must never boot, not silently fall back to console
+    # (which would look like it worked, right up until nobody ever receives
+    # a real email) or fail confusingly on the first registration instead.
+    raise ImproperlyConfigured(
+        "EMAIL_PROVIDER=brevo requires both BREVO_API_KEY and "
+        "DEFAULT_FROM_EMAIL to be set."
+    )
+
 # google-signin-spec.md §0/§7: the Web-application OAuth Client ID every
 # Google ID token's audience is checked against. Empty-string default (not a
 # placeholder that looks real) so a misconfigured deployment fails closed —

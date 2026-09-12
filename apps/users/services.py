@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import timedelta
 
@@ -7,11 +8,13 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 
 from django.conf import settings
-from django.core.mail import send_mail
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.users.email_delivery import EmailDeliveryError, get_email_provider
 from apps.users.models import EmailVerificationToken, User
+
+logger = logging.getLogger(__name__)
 
 
 class EmailAlreadyRegistered(Exception):
@@ -91,20 +94,27 @@ class EmailVerificationService:
 
     @staticmethod
     def send_verification_email(user, raw_token):
-        # Plain text — the console EMAIL_BACKEND (§4.6) is a terminal print,
-        # not real delivery, so HTML templating would be effort spent on
-        # nothing. A real provider is a separate, later decision.
+        # Plain text — HTML templating would be effort spent on nothing for
+        # a link-plus-two-sentences email. This method owns the CONTENT
+        # (subject, body, and building the verification URL from
+        # FRONTEND_URL) exactly as before; it now hands that content to
+        # get_email_provider() rather than calling Django's send_mail
+        # directly, so it never knows or cares whether the active provider
+        # is the local console backend or Brevo's HTTPS API (auth-
+        # production-readiness spec — the Brevo fix). Raises
+        # EmailDeliveryError, unhandled, on a genuine delivery failure — see
+        # apps/users/views.py RegisterView and .resend() below for how each
+        # caller handles that.
         link = f"{settings.FRONTEND_URL}/verify-email?token={raw_token}"
-        send_mail(
+        get_email_provider().send(
+            to_email=user.email,
             subject="Verify your email — Multi-Tenant SaaS Billing Engine",
-            message=(
+            body=(
                 "Welcome! Confirm your email address to activate your "
                 f"account:\n\n{link}\n\n"
                 "This link expires in 24 hours. If you didn't create this "
                 "account, you can ignore this message."
             ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
         )
 
     @staticmethod
@@ -169,7 +179,20 @@ class EmailVerificationService:
         ).update(used_at=timezone.now())
 
         raw_token = EmailVerificationService.issue_token(user)
-        EmailVerificationService.send_verification_email(user, raw_token)
+        try:
+            EmailVerificationService.send_verification_email(user, raw_token)
+        except EmailDeliveryError:
+            # spec §4.4/§6 non-disclosure: resend's response to the caller
+            # is identical no matter what happens internally — including a
+            # genuine provider outage — so nothing here can let a caller
+            # distinguish "no such account" from "account exists but the
+            # email provider is down" from the response alone. The token
+            # issued above is still valid regardless; a real user can just
+            # try resend again once the provider recovers. Logged, not
+            # swallowed silently, so an operator can see it.
+            logger.warning(
+                "resend-verification: email delivery failed for user %s", user.id
+            )
 
 
 class GoogleSignInFailed(Exception):
