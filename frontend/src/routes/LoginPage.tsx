@@ -7,6 +7,15 @@
  *
  * On success the user goes to /workspace (§C.4: "redirect to workspace
  * selection"), not straight to the app shell — tenant context is chosen there.
+ *
+ * Login-page redesign — final hierarchy, primary to tertiary:
+ *   1. Primary:   Email / Password / Sign in (the existing form, unchanged).
+ *   2. Secondary: an "or" divider, then a single centered, compact,
+ *      icon-only Google button (GoogleSignInButton's own icon-only
+ *      configuration — see that file).
+ *   3. Tertiary:  "New here? Create an account", below the Google button.
+ * Only the ORDER and the Google button's own sizing changed here — the
+ * form markup, its handlers, and AuthArtPanel/AuthLayout are untouched.
  */
 
 import { useState, type FormEvent } from 'react'
@@ -65,19 +74,7 @@ export function LoginPage() {
         </Alert>
       )}
 
-      <div className="mt-6">
-        <GoogleSignInButton
-          onSuccess={() => navigate('/workspace', { replace: true })}
-          onError={setError}
-        />
-      </div>
-
-      <div className="mt-6 flex items-center gap-3 text-caption text-secondary">
-        <span className="h-px flex-1 bg-subtle" aria-hidden="true" />
-        or
-        <span className="h-px flex-1 bg-subtle" aria-hidden="true" />
-      </div>
-
+      {/* 1. Primary: email / password / Sign in. */}
       <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4" noValidate>
         <Input
           label="Email"
@@ -104,6 +101,22 @@ export function LoginPage() {
         </Button>
       </form>
 
+      {/* 2. Secondary: divider, then a single centered, compact Google button. */}
+      <div className="mt-6 flex items-center gap-3 text-caption text-secondary">
+        <span className="h-px flex-1 bg-subtle" aria-hidden="true" />
+        or
+        <span className="h-px flex-1 bg-subtle" aria-hidden="true" />
+      </div>
+
+      <div className="mt-6 flex justify-center">
+        <GoogleSignInButton
+          variant="icon"
+          onSuccess={() => navigate('/workspace', { replace: true })}
+          onError={setError}
+        />
+      </div>
+
+      {/* 3. Tertiary: sign-up, below the Google button. */}
       <p className="mt-6 text-body text-secondary">
         New here?{' '}
         <Link

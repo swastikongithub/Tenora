@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { MemoryRouter } from 'react-router-dom'
@@ -19,9 +19,12 @@ vi.mock('../../lib/config', async (importOriginal) => {
 
 /** Stubs window.google.accounts.id, capturing the callback GoogleSignInButton
  *  registers so a test can simulate the user completing the Google flow
- *  (spec §9/§11 — never a real OAuth interaction in tests). */
+ *  (spec §9/§11 — never a real OAuth interaction in tests). Also captures
+ *  the options passed to renderButton so a test can assert on the
+ *  icon-only configuration without recreating GIS itself. */
 function stubGoogleIdentityServices() {
   let capturedCallback: ((response: { credential: string }) => void) | null = null
+  let capturedRenderOptions: Record<string, unknown> | null = null
   const w = window as unknown as {
     google?: {
       accounts: {
@@ -29,7 +32,7 @@ function stubGoogleIdentityServices() {
           initialize: (config: {
             callback: (response: { credential: string }) => void
           }) => void
-          renderButton: () => void
+          renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void
         }
       }
     }
@@ -40,7 +43,9 @@ function stubGoogleIdentityServices() {
         initialize: (config) => {
           capturedCallback = config.callback
         },
-        renderButton: () => {},
+        renderButton: (_parent, options) => {
+          capturedRenderOptions = options
+        },
       },
     },
   }
@@ -49,6 +54,7 @@ function stubGoogleIdentityServices() {
       if (!capturedCallback) throw new Error('initialize() was never called')
       capturedCallback({ credential })
     },
+    getRenderOptions: () => capturedRenderOptions,
   }
 }
 
@@ -266,5 +272,52 @@ describe('RegisterPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Workspaces' }),
     ).toBeInTheDocument()
+  })
+
+  it('renders the compact icon-only GIS configuration, matching LoginPage', async () => {
+    const google = stubGoogleIdentityServices()
+    renderAt('/register')
+    await screen.findByRole('heading', { name: 'Create account' })
+
+    await waitFor(() => expect(google.getRenderOptions()).not.toBeNull())
+    expect(google.getRenderOptions()).toMatchObject({ type: 'icon', shape: 'circle' })
+  })
+
+  it('exposes an accessible label on the compact Google control', async () => {
+    stubGoogleIdentityServices()
+    renderAt('/register')
+    await screen.findByRole('heading', { name: 'Create account' })
+
+    expect(
+      screen.getByRole('group', { name: 'Sign in with Google' }),
+    ).toBeInTheDocument()
+  })
+
+  it('orders Google below the "Already have an account? Sign in" link', async () => {
+    stubGoogleIdentityServices()
+    renderAt('/register')
+    await screen.findByRole('heading', { name: 'Create account' })
+
+    const createAccountButton = screen.getByRole('button', { name: 'Create account' })
+    const signInLink = screen.getByRole('link', { name: 'Sign in' })
+    const googleGroup = screen.getByRole('group', { name: 'Sign in with Google' })
+
+    // DOCUMENT_POSITION_FOLLOWING (4) means the argument comes after `node`.
+    expect(
+      createAccountButton.compareDocumentPosition(signInLink) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      signInLink.compareDocumentPosition(googleGroup) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('renders no "or" divider on the registration page', async () => {
+    stubGoogleIdentityServices()
+    renderAt('/register')
+    await screen.findByRole('heading', { name: 'Create account' })
+
+    expect(screen.queryByText('or')).not.toBeInTheDocument()
   })
 })

@@ -169,19 +169,6 @@ export function RegisterPage() {
         </Alert>
       )}
 
-      <div className="mt-6">
-        {/* isAuthenticated flips true as soon as this resolves, and the
-            early `<Navigate>` above then redirects — no explicit onSuccess
-            action needed here, unlike LoginPage's imperative navigate(). */}
-        <GoogleSignInButton onSuccess={() => {}} onError={setFormError} />
-      </div>
-
-      <div className="mt-6 flex items-center gap-3 text-caption text-secondary">
-        <span className="h-px flex-1 bg-subtle" aria-hidden="true" />
-        or
-        <span className="h-px flex-1 bg-subtle" aria-hidden="true" />
-      </div>
-
       <form onSubmit={onSubmit} className="mt-6 flex flex-col gap-4" noValidate>
         <Input
           label="Email"
@@ -233,6 +220,18 @@ export function RegisterPage() {
           Sign in
         </Link>
       </p>
+
+      <div className="mt-6 flex justify-center">
+        {/* isAuthenticated flips true as soon as this resolves, and the
+            early `<Navigate>` above then redirects — no explicit onSuccess
+            action needed here, unlike LoginPage's imperative navigate().
+            variant="icon" matches LoginPage's compact treatment (same
+            shared component/options — see GoogleSignInButton.tsx). No "or"
+            divider here — Google sits below the sign-in link as its own
+            standalone secondary option, not an alternative to the form
+            above it the way LoginPage's flow reads. */}
+        <GoogleSignInButton variant="icon" onSuccess={() => {}} onError={setFormError} />
+      </div>
     </AuthLayout>
   )
 }

@@ -12,6 +12,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -127,12 +128,41 @@ USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# email-verification-spec.md §4.6: console backend prints the email to the
-# terminal/log rather than attempting real delivery — a deliberate scope
-# boundary for local dev and this portfolio demo, not an oversight. A real
-# transactional provider (SES/Postmark/SendGrid) would be a separate, later
-# decision if this project ever needs actual delivered email. See CLAUDE.md.
-EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+# Production email delivery (auth-production-readiness spec). Provider-
+# neutral by construction: Django's own SMTP backend, configured entirely by
+# environment variables — any SMTP-compatible transactional provider
+# (SendGrid, Postmark, SES-SMTP, Mailgun, ...) works by changing env values
+# only, never a code change, and no vendor SDK is imported here.
+#
+# The DEFAULT (nothing set) stays the console backend — email-verification
+# -spec.md §4.6's original reasoning holds unchanged for local dev/CI: a
+# terminal print, not real delivery, so tests and a fresh `git clone` never
+# need real SMTP credentials or network access to run. A deployment that
+# wants real delivery sets EMAIL_BACKEND explicitly (e.g.
+# "django.core.mail.backends.smtp.EmailBackend") alongside the connection
+# settings below.
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend"
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+# Never logged, never included in any exception message — see
+# apps/users/services.py EmailVerificationService, which only ever passes
+# these to Django's own send_mail/backend machinery.
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "true").lower() == "true"
+EMAIL_USE_SSL = os.environ.get("EMAIL_USE_SSL", "false").lower() == "true"
+if EMAIL_USE_TLS and EMAIL_USE_SSL:
+    # Django's own SMTP backend raises this same conflict, but only lazily,
+    # the first time a connection is actually opened (e.g. the first
+    # verification email) — failing here instead means a misconfigured
+    # deployment never even starts, rather than surfacing confusingly at an
+    # unrelated later moment.
+    raise ImproperlyConfigured(
+        "EMAIL_USE_TLS and EMAIL_USE_SSL are mutually exclusive — set at "
+        "most one of them."
+    )
 DEFAULT_FROM_EMAIL = os.environ.get(
     "DEFAULT_FROM_EMAIL", "noreply@billing-engine.local"
 )

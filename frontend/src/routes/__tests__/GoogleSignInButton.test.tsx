@@ -15,9 +15,12 @@ vi.mock('../../lib/config', async (importOriginal) => {
 /** Stubs window.google.accounts.id the way the real GIS script would define
  *  it, capturing the callback GoogleSignInButton registers so a test can
  *  invoke it directly — simulating the user completing the Google flow
- *  without attempting any real OAuth interaction (spec §9/§11). */
+ *  without attempting any real OAuth interaction (spec §9/§11). Also
+ *  captures the options passed to renderButton so a test can assert on the
+ *  icon-only vs. full-width configuration without recreating GIS itself. */
 function stubGoogleIdentityServices() {
   let capturedCallback: ((response: { credential: string }) => void) | null = null
+  let capturedRenderOptions: Record<string, unknown> | null = null
   const w = window as unknown as {
     google?: {
       accounts: {
@@ -25,7 +28,7 @@ function stubGoogleIdentityServices() {
           initialize: (config: {
             callback: (response: { credential: string }) => void
           }) => void
-          renderButton: () => void
+          renderButton: (parent: HTMLElement, options: Record<string, unknown>) => void
         }
       }
     }
@@ -36,7 +39,9 @@ function stubGoogleIdentityServices() {
         initialize: (config) => {
           capturedCallback = config.callback
         },
-        renderButton: () => {},
+        renderButton: (_parent, options) => {
+          capturedRenderOptions = options
+        },
       },
     },
   }
@@ -45,6 +50,7 @@ function stubGoogleIdentityServices() {
       if (!capturedCallback) throw new Error('initialize() was never called')
       capturedCallback({ credential })
     },
+    getRenderOptions: () => capturedRenderOptions,
   }
 }
 
@@ -95,6 +101,58 @@ describe('GoogleSignInButton', () => {
 
     await waitFor(() => expect(onError).toHaveBeenCalledWith('Google sign-in failed.'))
     expect(onSuccess).not.toHaveBeenCalled()
+  })
+
+  it('renders the compact icon-only GIS configuration for variant="icon"', async () => {
+    const google = stubGoogleIdentityServices()
+    render(
+      <AuthProvider>
+        <GoogleSignInButton onSuccess={vi.fn()} onError={vi.fn()} variant="icon" />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(google.getRenderOptions()).not.toBeNull())
+    expect(google.getRenderOptions()).toMatchObject({ type: 'icon', shape: 'circle' })
+  })
+
+  it('renders the original full-width GIS configuration by default (variant omitted)', async () => {
+    const google = stubGoogleIdentityServices()
+    render(
+      <AuthProvider>
+        <GoogleSignInButton onSuccess={vi.fn()} onError={vi.fn()} />
+      </AuthProvider>,
+    )
+
+    await waitFor(() => expect(google.getRenderOptions()).not.toBeNull())
+    expect(google.getRenderOptions()).toMatchObject({ width: '400' })
+  })
+
+  it('the icon-only variant still invokes the existing GIS callback and onSuccess', async () => {
+    server.use(
+      http.post(apiUrl('/auth/google/'), () => HttpResponse.json({ access: 'a', refresh: 'r' })),
+    )
+    const google = stubGoogleIdentityServices()
+    const onSuccess = vi.fn()
+    render(
+      <AuthProvider>
+        <GoogleSignInButton onSuccess={onSuccess} onError={vi.fn()} variant="icon" />
+      </AuthProvider>,
+    )
+
+    google.fireCredentialResponse('fake-google-jwt')
+
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledTimes(1))
+  })
+
+  it('exposes an accessible group label regardless of variant', () => {
+    stubGoogleIdentityServices()
+    const { getByRole } = render(
+      <AuthProvider>
+        <GoogleSignInButton onSuccess={vi.fn()} onError={vi.fn()} variant="icon" />
+      </AuthProvider>,
+    )
+
+    expect(getByRole('group', { name: 'Sign in with Google' })).toBeInTheDocument()
   })
 
   it('renders nothing when window.google is not yet available and no client ID configured path is not hit', () => {

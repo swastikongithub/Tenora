@@ -186,4 +186,46 @@ describe('LoginPage', () => {
       await screen.findByRole('heading', { name: 'Workspaces' }),
     ).toBeInTheDocument()
   })
+
+  it('exposes an accessible label on the compact Google control', async () => {
+    stubGoogleIdentityServices()
+    renderAt('/login')
+    await screen.findByRole('heading', { name: 'Sign in' })
+
+    expect(
+      screen.getByRole('group', { name: 'Sign in with Google' }),
+    ).toBeInTheDocument()
+  })
+
+  it('orders the page as: sign-in form, then Google, then the sign-up link', async () => {
+    stubGoogleIdentityServices()
+    renderAt('/login')
+    await screen.findByRole('heading', { name: 'Sign in' })
+
+    const signInButton = screen.getByRole('button', { name: 'Sign in' })
+    const googleGroup = screen.getByRole('group', { name: 'Sign in with Google' })
+    const signUpLink = screen.getByRole('link', { name: 'Create account' })
+
+    // DOCUMENT_POSITION_FOLLOWING (4) means the argument comes after `node`.
+    expect(
+      signInButton.compareDocumentPosition(googleGroup) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      googleGroup.compareDocumentPosition(signUpLink) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it('the sign-up link below Google navigates to the register page', async () => {
+    stubGoogleIdentityServices()
+    renderAt('/login')
+    await screen.findByRole('heading', { name: 'Sign in' })
+
+    await userEvent.click(screen.getByRole('link', { name: 'Create account' }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Create account' }),
+    ).toBeInTheDocument()
+  })
 })
