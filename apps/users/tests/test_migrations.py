@@ -22,6 +22,14 @@ MIGRATE_TO = [(APP, "0003_user_email_verified_emailverificationtoken")]
 
 
 class GrandfatheringMigrationTests(TransactionTestCase):
+    def tearDown(self):
+        # Restore the schema to the latest migrations. While 0003 was the newest
+        # users migration, stopping there was harmless; once a later migration
+        # exists (0004), leaving the schema at 0003 would strand every test that
+        # runs afterwards on an out-of-date table. Assertions are unchanged.
+        executor = MigrationExecutor(connection)
+        executor.migrate(executor.loader.graph.leaf_nodes())
+
     def test_pre_existing_user_is_grandfathered_as_verified(self):
         executor = MigrationExecutor(connection)
         executor.migrate(MIGRATE_FROM)

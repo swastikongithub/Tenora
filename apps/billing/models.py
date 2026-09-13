@@ -29,6 +29,15 @@ class Plan(models.Model):
         max_length=10, choices=Interval.choices, default=Interval.MONTHLY
     )
     is_active = models.BooleanField(default=True)
+    # Property-billing plan §17 — the plan's entitlements, as data. Enforced
+    # server-side by apps.tenants.limits.PlanLimitService, never only in the UI.
+    # `max_workspaces` is how many workspaces an OWNER on this plan may own;
+    # `max_members_per_workspace` is how many ACTIVE resident memberships (plus
+    # pending invitations, which reserve a seat) one workspace may hold. Defaults
+    # are the Basic tier, so every pre-existing row is valid with no backfill.
+    # Local entitlements only — never sent to a payment gateway.
+    max_workspaces = models.PositiveIntegerField(default=2)
+    max_members_per_workspace = models.PositiveIntegerField(default=10)
     # The corresponding gateway-side plan ID, populated by
     # `manage.py sync_razorpay_plans` via the active adapter. Provider-neutral
     # name (payment-gateway-adapter-spec.md §4.5). Nullable so existing rows and

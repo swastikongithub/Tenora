@@ -70,6 +70,13 @@ class User(AbstractUser):
     # successful EmailVerificationService.verify() call or the one-time
     # grandfathering migration for pre-existing rows.
     email_verified = models.BooleanField(default=False)
+    # Contact number for account settings and bill/receipt contact details.
+    # Blank by default — additive, so no existing row needs a value.
+    phone = models.CharField(max_length=32, blank=True, default="")
+    # Set once by AccountService.delete_account. The row is anonymized and
+    # deactivated rather than hard-deleted, so bills, payments, receipts and
+    # audit rows that reference this person keep a valid foreign key.
+    deleted_at = models.DateTimeField(null=True, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

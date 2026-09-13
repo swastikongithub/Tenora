@@ -169,7 +169,11 @@ describe('OverviewPage — 404 empty state', () => {
     expect(within(team).getByText('2')).toBeInTheDocument()
   })
 
-  it('MEMBER sees an informational message with no action', async () => {
+  // Property-billing plan §16.5 changed this contract: a MEMBER is a resident,
+  // not a Tenora subscriber. The owner's overview (subscription + workspace) is not rendered for
+  // them at all — they are sent to their own dashboard (and the backend refuses
+  // the subscription endpoint to a resident regardless).
+  it('redirects a MEMBER (resident) to their dashboard', async () => {
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_B]),
@@ -178,13 +182,9 @@ describe('OverviewPage — 404 empty state', () => {
     )
     renderOverview(TENANT_B)
 
-    expect(await screen.findByText('No subscription yet.')).toBeInTheDocument()
-    expect(
-      screen.getByText(/An owner of this workspace can start one\./),
-    ).toBeInTheDocument()
-    expect(
-      screen.queryByRole('link', { name: 'Choose a plan' }),
-    ).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^Welcome/ })).toBeInTheDocument()
+    expect(screen.queryByText('No subscription yet.')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Choose a plan' })).not.toBeInTheDocument()
   })
 })
 
@@ -254,7 +254,7 @@ describe('OverviewPage — Plan section', () => {
     ).toHaveAttribute('href', '/subscription')
   })
 
-  it('hides Change plan for a MEMBER', async () => {
+  it('never shows Change plan to a MEMBER (redirected to their dashboard)', async () => {
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_B]),
@@ -263,13 +263,8 @@ describe('OverviewPage — Plan section', () => {
     )
     renderOverview(TENANT_B)
 
-    const plan = await sectionFor('Plan')
-    await waitFor(() =>
-      expect(within(plan).getByText(/billed monthly/)).toBeInTheDocument(),
-    )
-    expect(
-      within(plan).queryByRole('link', { name: 'Change plan' }),
-    ).not.toBeInTheDocument()
+    await screen.findByRole('heading', { name: /^Welcome/ })
+    expect(screen.queryByRole('link', { name: 'Change plan' })).not.toBeInTheDocument()
   })
 })
 
@@ -385,10 +380,14 @@ describe('OverviewPage — per-query failure isolation (signature test)', () => 
 })
 
 describe('OverviewPage — tenant switch', () => {
+  // Both workspaces are OWNED: a resident never reaches /overview since
+  // property billing, and the invariant under test is cache isolation.
+  const TENANT_B_OWNER = { ...TENANT_B, role: 'OWNER' as const }
+
   it('every section refetches and reflects the new tenant, with no old-tenant value left behind', async () => {
     server.use(
       ...authHandlers(),
-      tenantsMeHandler([TENANT_A, TENANT_B]),
+      tenantsMeHandler([TENANT_A, TENANT_B_OWNER]),
       currentSubscriptionByTenantHandler({
         [TENANT_A.id]: subscriptionFor(PLAN_PRO, 'ACTIVE'),
         [TENANT_B.id]: subscriptionFor(PLAN_TEAM, 'TRIALING'),

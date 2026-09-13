@@ -180,7 +180,13 @@ class PlanManagementService:
     #: subscriptions, checkouts and proration records already reference.
     #: Platform policy, enforced regardless of what any adapter's provider
     #: would technically permit (spec §B).
-    MUTABLE_WHEN_LOCKED = frozenset({"name", "is_active"})
+    #: The property-billing plan limits (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md
+    #: §17) are local entitlements that never reach a gateway, so they stay
+    #: editable on a synced plan too. Lowering one deletes nothing: an over-limit
+    #: workspace simply cannot grow (apps.tenants.limits).
+    MUTABLE_WHEN_LOCKED = frozenset(
+        {"name", "is_active", "max_workspaces", "max_members_per_workspace"}
+    )
 
     @staticmethod
     @transaction.atomic
@@ -520,3 +526,51 @@ class TenantSuspensionService:
             },
         )
         return tenant
+
+class LastWorkspaceOwnerProtected(Exception):
+    """Demoting this membership would leave the workspace with no active owner."""
+
+
+class WorkspaceRoleService:
+    """
+    Property-billing plan §4.1.1 — the platform root may promote a workspace
+    member to OWNER or demote an OWNER to MEMBER, REGARDLESS of the plan the
+    workspace or the person pays for: plan tier is never an authorization input
+    for platform administration.
+
+    The one invariant kept, mirroring the last-root rule one level down: a
+    workspace always retains at least one active owner. Critical audit, in the
+    same transaction.
+    """
+
+    @staticmethod
+    @transaction.atomic
+    def set_role(*, actor, membership, role):
+        from apps.tenants.models import Membership, Tenant
+
+        Tenant.objects.select_for_update().get(pk=membership.tenant_id)
+        membership = Membership.objects.select_for_update().get(pk=membership.pk)
+        if membership.status != Membership.Status.ACTIVE:
+            raise ValueError("Only an active membership's role can be changed.")
+        if membership.role == role:
+            return membership
+        if membership.role == Membership.Role.OWNER and role != Membership.Role.OWNER:
+            other_owners = Membership.objects.filter(
+                tenant_id=membership.tenant_id,
+                role=Membership.Role.OWNER,
+                status=Membership.Status.ACTIVE,
+            ).exclude(pk=membership.pk)
+            if not other_owners.exists():
+                raise LastWorkspaceOwnerProtected()
+        before = membership.role
+        membership.role = role
+        membership.save(update_fields=["role"])
+        AuditService.record_critical(
+            actor=actor,
+            action="membership.role_changed",
+            target_type="Membership",
+            target_id=membership.id,
+            summary=f"Changed {membership.user.email}'s role in {membership.tenant.name}: {before} -> {role}",
+            metadata={"tenant_id": str(membership.tenant_id), "before": before, "after": role},
+        )
+        return membership

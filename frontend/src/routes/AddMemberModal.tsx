@@ -1,7 +1,8 @@
 /**
  * Add-member form, in a Modal (§C.4 Page 3). A single email field, POSTed to
- * `/api/memberships/` — which adds an *existing* user to the current tenant as
- * MEMBER.
+ * `/api/memberships/` — which, since property billing, INVITES an existing user
+ * to the current tenant as a MEMBER (resident). No membership exists until the
+ * invited user accepts from their notifications (plan §4.4).
  *
  * There is deliberately NO role field. The endpoint only ever assigns MEMBER
  * (master spec §A.4.15 / B1); a role selector would imply a capability the API
@@ -118,7 +119,8 @@ export function AddMemberModal({ open, onClose, onAdded }: AddMemberModalProps) 
           disabled={submitting}
           error={Boolean(emailError)}
           helperText={
-            emailError ?? 'The person must already have an account.'
+            emailError ??
+            'The person must already have an account. They receive an invitation and join only when they accept it.'
           }
           autoFocus
           required

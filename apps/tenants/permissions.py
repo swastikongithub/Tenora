@@ -32,3 +32,47 @@ class IsTenantOwner(BasePermission):
     def has_permission(self, request, view):
         membership = getattr(request, "membership", None)
         return membership is not None and membership.role == Membership.Role.OWNER
+
+
+# Property-billing plan §43.14: authorization is phrased as CAPABILITIES granted
+# to a role, not as `role == OWNER` scattered across views. Today there are two
+# roles; a future Property Manager or Accountant is one more entry here (e.g.
+# {"property.manage", "billing.manage"}), with no view rewritten.
+#
+# `billing.view_own` is the resident capability: every resident-visible query
+# additionally filters on the authenticated user's own Resident profile, so the
+# capability never widens what a resident can read — it only admits them.
+ROLE_CAPABILITIES = {
+    Membership.Role.OWNER: frozenset(
+        {
+            "workspace.manage",
+            "members.manage",
+            "property.manage",
+            "billing.manage",
+            "payments.manage",
+            "reports.view",
+            "subscription.view",
+            "subscription.manage",
+        }
+    ),
+    Membership.Role.MEMBER: frozenset({"billing.view_own"}),
+}
+
+
+def has_capability(membership, capability):
+    if membership is None or membership.status != Membership.Status.ACTIVE:
+        return False
+    return capability in ROLE_CAPABILITIES.get(membership.role, frozenset())
+
+
+def RequiresCapability(capability):
+    """Build a DRF permission class requiring one workspace capability."""
+
+    class _RequiresCapability(BasePermission):
+        message = "Your role in this workspace does not allow this action."
+
+        def has_permission(self, request, view):
+            return has_capability(getattr(request, "membership", None), capability)
+
+    _RequiresCapability.__name__ = f"Requires[{capability}]"
+    return _RequiresCapability

@@ -60,6 +60,11 @@ INSTALLED_APPS = [
     "apps.tenants",
     "apps.billing",
     "apps.platform",
+    # Property billing (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md) — the
+    # resident -> workspace-owner financial domain, kept separate from
+    # apps.billing (the owner -> Tenora subscription domain).
+    "apps.properties",
+    "apps.notifications",
 ]
 
 MIDDLEWARE = [
@@ -126,6 +131,16 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+
+# Uploaded meter-reading proof images. Never served from a public URL: they are
+# streamed only through authorized API views (apps.properties.views
+# .MeterReadingProofView, apps.platform.property_views.PlatformReadingProofView).
+MEDIA_ROOT = Path(os.environ.get("MEDIA_ROOT", BASE_DIR / "media"))
+DATA_UPLOAD_MAX_MEMORY_SIZE = 6 * 1024 * 1024
+
+# Property-billing plan §17 — limits applied when an owner/workspace has no
+# entitled Tenora subscription yet (Basic's numbers). Plans carry their own.
+PROPERTY_DEFAULT_PLAN_LIMITS = {"max_workspaces": 2, "max_members_per_workspace": 10}
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Production email delivery (auth-production-readiness spec). Provider-

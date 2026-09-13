@@ -32,7 +32,14 @@ import { Link, NavLink } from 'react-router-dom'
 
 import { cn } from '../../lib/cn'
 import { AccountMenu } from './AccountMenu'
-import { NAV_ITEMS, PLATFORM_ADMIN_NAV_ITEM } from './nav-items'
+import { useTenant } from '../../lib/tenant'
+import {
+  NAV_ITEMS,
+  OWNER_NAV_ITEMS,
+  PLATFORM_ADMIN_NAV_ITEM,
+  RESIDENT_NAV_ITEMS,
+} from './nav-items'
+import { NotificationBell } from './NotificationBell'
 import { TenantSwitcher } from './TenantSwitcher'
 import { useCurrentUser } from './use-current-user'
 import { useDisclosure } from './use-disclosure'
@@ -65,16 +72,24 @@ const panelLinkClass = ({ isActive }: { isActive: boolean }) =>
   )
 
 export function TopNavbar() {
-  const isDesktop = useMediaQuery('(min-width: 1024px)')
+  // Property billing widened the owner navigation, so the inline tab row now
+  // starts at 1280px; below that the links sit behind the hamburger.
+  const isDesktop = useMediaQuery('(min-width: 1280px)')
   const menu = useDisclosure()
   const { isStaff } = useCurrentUser()
+  const { currentTenant } = useTenant()
 
-  // Platform staff get one extra nav entry. Appended, not built into
-  // NAV_ITEMS — see nav-items.tsx. The link is UX only; IsPlatformStaff on
-  // the backend is the real boundary.
-  const navItems = isStaff
-    ? [...NAV_ITEMS, PLATFORM_ADMIN_NAV_ITEM]
-    : NAV_ITEMS
+  // Role-aware (nav-items.tsx): a resident gets the narrow portal, an owner the
+  // property-management surfaces, and a user with no workspace yet the
+  // original four. Platform staff get one extra entry, appended. Every link is
+  // UX only; the backend enforces each surface.
+  const roleItems =
+    currentTenant?.role === 'MEMBER'
+      ? RESIDENT_NAV_ITEMS
+      : currentTenant?.role === 'OWNER'
+        ? OWNER_NAV_ITEMS
+        : NAV_ITEMS
+  const navItems = isStaff ? [...roleItems, PLATFORM_ADMIN_NAV_ITEM] : roleItems
 
   // Fold the mobile panel away when the viewport grows to desktop.
   useEffect(() => {
@@ -94,7 +109,7 @@ export function TopNavbar() {
 
         {isDesktop ? (
           <nav aria-label="Primary" className="min-w-0">
-            <ul className="flex items-center gap-6">
+            <ul className="flex items-center gap-5">
               {navItems.map((item) => (
                 <li key={item.to}>
                   <NavLink to={item.to} className={desktopLinkClass}>
@@ -131,6 +146,7 @@ export function TopNavbar() {
           <div className="w-[132px] sm:w-[190px] lg:w-[220px]">
             <TenantSwitcher />
           </div>
+          <NotificationBell />
           <AccountMenu />
         </div>
       </div>

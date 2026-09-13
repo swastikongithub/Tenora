@@ -59,6 +59,29 @@ export const GLOBAL_PATHS: ReadonlySet<string> = new Set([
   // Root tier. Role management is a PATCH on '/api/platform/users/detail/',
   // already listed above, so this is the only new entry.
   '/api/platform/webhook-events/raw/',
+  // Property billing (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md) — user-level
+  // paths with no single workspace context (every view filters on the
+  // authenticated user), plus the platform-admin property billing reads and
+  // the root workspace-role control. Byte-identical to the backend set.
+  '/api/notifications/',
+  '/api/notifications/unread-count/',
+  '/api/notifications/read/',
+  '/api/notifications/preferences/',
+  '/api/invitations/mine/',
+  '/api/invitations/respond/',
+  '/api/account/profile/',
+  '/api/account/password/',
+  '/api/account/delete/',
+  '/api/account/usage/',
+  '/api/platform/memberships/detail/',
+  '/api/platform/property-billing/summary/',
+  '/api/platform/property-billing/workspaces/',
+  '/api/platform/property-billing/workspaces/detail/',
+  '/api/platform/property-billing/bills/',
+  '/api/platform/property-billing/bills/detail/',
+  '/api/platform/property-billing/payments/',
+  '/api/platform/property-billing/receipts/',
+  '/api/platform/property-billing/reading-proof/',
 ])
 
 /**

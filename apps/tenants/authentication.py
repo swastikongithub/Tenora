@@ -70,6 +70,34 @@ GLOBAL_PATHS = frozenset({
     # exactly like its siblings; its own narrower gate is IsPlatformRoot on
     # the view.
     "/api/platform/webhook-events/raw/",
+    # Property billing (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md). Each is
+    # user-level, not workspace-level: a notification, an invitation addressed
+    # to me, my account — none has a single workspace context to resolve, and
+    # every one of their views filters on request.user. Workspace-owned
+    # property data (properties, bills, payments, ...) is NOT listed here and
+    # stays tenant-scoped through X-Tenant-ID + ACTIVE membership.
+    "/api/notifications/",
+    "/api/notifications/unread-count/",
+    "/api/notifications/read/",
+    "/api/notifications/preferences/",
+    "/api/invitations/mine/",
+    "/api/invitations/respond/",
+    "/api/account/profile/",
+    "/api/account/password/",
+    "/api/account/delete/",
+    "/api/account/usage/",
+    # Platform-admin property billing visibility + workspace role control.
+    # Cross-tenant by design, gated by IsPlatformStaff / IsPlatformRoot on the
+    # views, exactly like every /api/platform/ entry above.
+    "/api/platform/memberships/detail/",
+    "/api/platform/property-billing/summary/",
+    "/api/platform/property-billing/workspaces/",
+    "/api/platform/property-billing/workspaces/detail/",
+    "/api/platform/property-billing/bills/",
+    "/api/platform/property-billing/bills/detail/",
+    "/api/platform/property-billing/payments/",
+    "/api/platform/property-billing/receipts/",
+    "/api/platform/property-billing/reading-proof/",
 })
 
 
@@ -142,8 +170,11 @@ class TenantJWTAuthentication(JWTAuthentication):
             raise TenantHeaderRequired()
 
         try:
+            # Only an ACTIVE membership resolves (property-billing plan §27.1).
+            # A member who left or was removed is, for authorization, exactly a
+            # non-member: the same 403, with no hint that a row still exists.
             membership = Membership.objects.select_related("tenant").get(
-                user=user, tenant_id=tenant_id
+                user=user, tenant_id=tenant_id, status=Membership.Status.ACTIVE
             )
         except (DjangoValidationError, ValueError):
             # Header was present but not a valid UUID — still a 400,

@@ -76,13 +76,16 @@ class SubscriptionReadTests(SubscriptionAPITestBase):
         self.assertEqual(resp.data["plan"]["code"], "PRO")
         self.assertEqual(resp.data["status"], Subscription.Status.TRIALING)
 
-    def test_member_can_read(self):
+    def test_member_cannot_read(self):
+        # Property-billing plan §16.5 changed this contract: a MEMBER is a
+        # resident, not a Tenora subscriber, and the backend (not just the UI)
+        # refuses them the owner's subscription.
         self._create_subscription()
         self._auth(self.member, self.tenant.id)
 
         resp = self.client.get(URL)
 
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_no_subscription_returns_404(self):
         self._auth(self.owner, self.tenant.id)

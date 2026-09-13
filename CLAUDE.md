@@ -90,6 +90,42 @@ These were each deliberated and corrected during design. Do not "fix" them back.
   SendGrid) is configured; that is a separate, later decision if this project ever needs
   actual delivered email. See `docs/email-verification-spec.md` §4.6.
 
+## Property billing — do not violate
+
+Spec: `docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md`. Two financial domains that never
+share a table: `apps.billing` (owner -> Tenora subscription) and `apps.properties`
+(resident -> workspace owner). Nothing in `apps.properties` references Plan,
+Subscription or the payment gateway.
+
+- **`Tenant` is the workspace; `Membership.Role.MEMBER` is a resident** (value kept,
+  labelled "Resident"). Authorization is by capability
+  (`apps.tenants.permissions.ROLE_CAPABILITIES` / `RequiresCapability`), not scattered
+  `role == OWNER` checks.
+- **Only `Membership.status == ACTIVE` resolves in `TenantJWTAuthentication`.** LEFT /
+  REMOVED rows are kept (history) and read as "not a member" (same 403).
+- **No one is silently added to a workspace.** `POST /api/memberships/` and
+  `/api/invitations/` create a PENDING `Invitation`; only
+  `InvitationService.respond(accept=True)` by the invited user creates/reactivates the
+  membership and `Resident` profile.
+- **Plan limits** live on `Plan.max_workspaces` / `max_members_per_workspace` and are
+  enforced in `apps.tenants.limits.PlanLimitService` under row locks (User row for
+  workspace creation, Tenant row for invitations/acceptance). Pending invitations
+  reserve a seat; the owner's seat is not counted.
+- **Issued bills are immutable history.** Bills snapshot names, rent, readings, rate
+  and totals in their own rows/line items; published bills change only via
+  `BillCorrectionService` (an ADJUSTMENT line + `BillCorrection` record) or payments.
+  Never recompute a historical bill from current lease/tariff/meter data.
+- **Overdue is derived, never stored** (`apps.properties.aging`, server date).
+- **Resident reads are filtered on the authenticated user** (`visible_bills` etc.);
+  a resident id is never taken from the client. Foreign ids are 404.
+- **Money**: integer minor units; readings/multipliers/rates are Decimals; the only
+  rounding is in `apps.properties.calculations` (ROUND_HALF_UP).
+- **Account deletion anonymizes and deactivates** (`apps.users.account`); it never
+  hard-deletes the User row and is refused while the user owns a workspace or is the
+  last root.
+- Frontend `TopNavbar` is role-aware; resident routes/owner routes are gated in
+  `routes/RoleRoute.tsx` (UX only — backend is authoritative).
+
 ## Commands
 
 ```

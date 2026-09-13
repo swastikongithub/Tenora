@@ -62,6 +62,46 @@ export const NAV_ITEMS: NavItem[] = [
 ]
 
 /**
+ * Property billing (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md §20, §43.11) —
+ * navigation follows the viewer's role in the ACTIVE workspace.
+ *
+ *   OWNER    the four items above, plus the property-management surfaces:
+ *            Properties, Residents, Billing (property billing — resident ->
+ *            owner) and Payments, with Settings. Subscription (owner -> Tenora)
+ *            stays: an owner has both relationships.
+ *   MEMBER   (a resident) a deliberately narrow portal. No Subscription and no
+ *            workspace administration; Billing replaces them.
+ *
+ * Hiding a link is UX only — every one of these surfaces is enforced server-side.
+ */
+const icon = (d: string) => (
+  <svg {...iconProps}>
+    <path d={d} />
+  </svg>
+)
+
+export const OWNER_NAV_ITEMS: NavItem[] = [
+  NAV_ITEMS[0],
+  { to: '/properties', label: 'Properties', icon: icon('M4 21V8l8-5 8 5v13M9 21v-6h6v6') },
+  { to: '/residents', label: 'Residents', icon: icon('M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0') },
+  { to: '/billing', label: 'Billing', icon: icon('M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6') },
+  { to: '/payments', label: 'Payments', icon: icon('M3 7h18v10H3zM3 11h18') },
+  NAV_ITEMS[2],
+  NAV_ITEMS[3],
+  NAV_ITEMS[1],
+  { to: '/settings', label: 'Settings', icon: icon('M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12l2-1-2-4-2 1-2-2V4h-4v2L9 7 7 6 5 10l2 1v2l-2 1 2 4 2-1 2 2v2h4v-2l2-2 2 1 2-4-2-1z') },
+]
+
+export const RESIDENT_NAV_ITEMS: NavItem[] = [
+  { to: '/home', label: 'Dashboard', icon: NAV_ITEMS[0].icon },
+  { to: '/my-bills', label: 'My Bills', icon: icon('M6 3h12v18l-3-2-3 2-3-2-3 2V3zM9 8h6M9 12h6') },
+  { to: '/billing-history', label: 'Billing History', icon: icon('M12 8v4l3 2M21 12a9 9 0 1 1-9-9') },
+  { to: '/receipts', label: 'Receipts', icon: icon('M5 3h14v18H5zM9 8h6M9 12h6M9 16h3') },
+  { to: '/notifications', label: 'Notifications', icon: icon('M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0') },
+  { to: '/settings', label: 'Settings', icon: icon('M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z') },
+]
+
+/**
  * Shown only to platform staff (docs/operator-control-plane-spec.md). Kept
  * out of NAV_ITEMS — that array is unconditional; TopNavbar appends this one
  * entry when `useCurrentUser().isStaff` is true. The nav link is UX only;

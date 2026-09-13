@@ -36,6 +36,9 @@ const ADMIN_NAV_ITEMS: AdminNavItem[] = [
   { to: '/admin/reconciliation', label: 'Reconciliation' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/audit-log', label: 'Audit Log' },
+  // Property billing (resident -> owner) across every workspace — read-only
+  // for Staff; the workspace role control inside is Root-only.
+  { to: '/admin/property-billing', label: 'Property Billing' },
 ]
 
 const tabLinkClass = ({ isActive }: { isActive: boolean }) =>

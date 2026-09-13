@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.tenants.models import Membership, Tenant
+from apps.tenants.models import Invitation, Membership, Tenant
 
 
 class TenantSerializer(serializers.ModelSerializer):
@@ -28,7 +28,7 @@ class MembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Membership
-        fields = ["id", "email", "role", "created_at"]
+        fields = ["id", "email", "role", "status", "created_at"]
 
 
 class MembershipCreateSerializer(serializers.Serializer):
@@ -38,3 +38,48 @@ class MembershipCreateSerializer(serializers.Serializer):
     """
 
     email = serializers.EmailField()
+
+
+class InvitationCreateSerializer(serializers.Serializer):
+    """Input shape only. No role, no tenant: an invitation is always for a
+    resident seat in the X-Tenant-ID workspace."""
+
+    email = serializers.EmailField()
+    unit_id = serializers.UUIDField(required=False, allow_null=True)
+    message = serializers.CharField(max_length=500, required=False, allow_blank=True, default="")
+
+
+class InvitationRespondSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    action = serializers.ChoiceField(choices=["accept", "decline"])
+
+
+class InvitationSerializer(serializers.ModelSerializer):
+    """Output only. Shown to the owner who sent it and to the invited user —
+    both of whom may legitimately see every field here."""
+
+    tenant_id = serializers.UUIDField(read_only=True)
+    tenant_name = serializers.CharField(source="tenant.name", read_only=True)
+    invited_by_email = serializers.EmailField(source="invited_by.email", default=None, read_only=True)
+    unit_id = serializers.UUIDField(read_only=True, allow_null=True)
+    unit_identifier = serializers.CharField(source="unit.identifier", default=None, read_only=True)
+    property_name = serializers.CharField(source="unit.property.name", default=None, read_only=True)
+
+    class Meta:
+        model = Invitation
+        fields = [
+            "id",
+            "tenant_id",
+            "tenant_name",
+            "email",
+            "role",
+            "status",
+            "unit_id",
+            "unit_identifier",
+            "property_name",
+            "message",
+            "invited_by_email",
+            "created_at",
+            "expires_at",
+            "responded_at",
+        ]

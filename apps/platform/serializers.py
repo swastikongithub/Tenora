@@ -322,6 +322,9 @@ class PlatformPlanUpdateSerializer(serializers.Serializer):
     currency = serializers.CharField(min_length=3, max_length=3, required=False)
     interval = serializers.ChoiceField(choices=Plan.Interval.choices, required=False)
     is_active = serializers.BooleanField(required=False)
+    # Property-billing plan §17: local entitlements, editable on any plan.
+    max_workspaces = serializers.IntegerField(min_value=1, max_value=10000, required=False)
+    max_members_per_workspace = serializers.IntegerField(min_value=0, max_value=100000, required=False)
 
     def validate_name(self, value):
         return _clean_name(value)

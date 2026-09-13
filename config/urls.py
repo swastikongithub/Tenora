@@ -43,13 +43,44 @@ from apps.platform.views import (
     PlatformWebhookEventRawView,
     PlatformWebhookProcessPendingView,
 )
+from apps.notifications.views import (
+    NotificationListView,
+    NotificationMarkReadView,
+    NotificationPreferenceView,
+    NotificationUnreadCountView,
+)
+from apps.platform.property_views import (
+    PlatformMembershipDetailView,
+    PlatformPropertyBillDetailView,
+    PlatformPropertyBillingSummaryView,
+    PlatformPropertyBillListView,
+    PlatformPropertyPaymentListView,
+    PlatformPropertyReceiptListView,
+    PlatformPropertyWorkspaceDetailView,
+    PlatformPropertyWorkspaceListView,
+    PlatformReadingProofView,
+)
+from apps.properties import views as pv
 from apps.tenants.views import (
+    AccountUsageView,
+    InvitationCancelView,
+    InvitationListCreateView,
+    InvitationRespondView,
+    LeaveWorkspaceView,
     MembershipListCreateView,
+    MembershipRemoveView,
+    MyInvitationsView,
     MyTenantsView,
+    OwnershipTransferView,
     TenantCreateView,
+    WorkspaceCloseView,
+    WorkspaceUsageView,
 )
 from apps.users.auth import EmailVerifiedTokenObtainPairView
 from apps.users.views import (
+    AccountDeleteView,
+    AccountPasswordView,
+    AccountProfileView,
     GoogleSignInView,
     LogoutView,
     MeView,
@@ -179,12 +210,186 @@ urlpatterns = [
         PlatformWebhookEventRawView.as_view(),
         name="platform_webhook_event_raw",
     ),
+    # --- Property billing: user-level global paths (in GLOBAL_PATHS) ---
+    # docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md. Notifications, invitations
+    # addressed to me, and my account have no single workspace context; each
+    # view filters on request.user.
+    path("api/notifications/", NotificationListView.as_view(), name="notification_list"),
+    path(
+        "api/notifications/unread-count/",
+        NotificationUnreadCountView.as_view(),
+        name="notification_unread_count",
+    ),
+    path("api/notifications/read/", NotificationMarkReadView.as_view(), name="notification_read"),
+    path(
+        "api/notifications/preferences/",
+        NotificationPreferenceView.as_view(),
+        name="notification_preferences",
+    ),
+    path("api/invitations/mine/", MyInvitationsView.as_view(), name="invitations_mine"),
+    path("api/invitations/respond/", InvitationRespondView.as_view(), name="invitation_respond"),
+    path("api/account/profile/", AccountProfileView.as_view(), name="account_profile"),
+    path("api/account/password/", AccountPasswordView.as_view(), name="account_password"),
+    path("api/account/delete/", AccountDeleteView.as_view(), name="account_delete"),
+    path("api/account/usage/", AccountUsageView.as_view(), name="account_usage"),
+    # --- Platform admin: property billing visibility + workspace roles ---
+    path(
+        "api/platform/memberships/detail/",
+        PlatformMembershipDetailView.as_view(),
+        name="platform_membership_detail",
+    ),
+    path(
+        "api/platform/property-billing/summary/",
+        PlatformPropertyBillingSummaryView.as_view(),
+        name="platform_property_billing_summary",
+    ),
+    path(
+        "api/platform/property-billing/workspaces/",
+        PlatformPropertyWorkspaceListView.as_view(),
+        name="platform_property_workspaces",
+    ),
+    path(
+        "api/platform/property-billing/workspaces/detail/",
+        PlatformPropertyWorkspaceDetailView.as_view(),
+        name="platform_property_workspace_detail",
+    ),
+    path(
+        "api/platform/property-billing/bills/",
+        PlatformPropertyBillListView.as_view(),
+        name="platform_property_bills",
+    ),
+    path(
+        "api/platform/property-billing/bills/detail/",
+        PlatformPropertyBillDetailView.as_view(),
+        name="platform_property_bill_detail",
+    ),
+    path(
+        "api/platform/property-billing/payments/",
+        PlatformPropertyPaymentListView.as_view(),
+        name="platform_property_payments",
+    ),
+    path(
+        "api/platform/property-billing/receipts/",
+        PlatformPropertyReceiptListView.as_view(),
+        name="platform_property_receipts",
+    ),
+    path(
+        "api/platform/property-billing/reading-proof/",
+        PlatformReadingProofView.as_view(),
+        name="platform_property_reading_proof",
+    ),
     # --- tenant-scoped (X-Tenant-ID resolved by TenantJWTAuthentication) ---
     path(
         "api/memberships/",
         MembershipListCreateView.as_view(),
         name="membership_list_create",
     ),
+    path("api/memberships/leave/", LeaveWorkspaceView.as_view(), name="membership_leave"),
+    path(
+        "api/memberships/<uuid:pk>/remove/",
+        MembershipRemoveView.as_view(),
+        name="membership_remove",
+    ),
+    path(
+        "api/memberships/<uuid:pk>/transfer-ownership/",
+        OwnershipTransferView.as_view(),
+        name="membership_transfer_ownership",
+    ),
+    path("api/invitations/", InvitationListCreateView.as_view(), name="invitation_list"),
+    path(
+        "api/invitations/<uuid:pk>/cancel/",
+        InvitationCancelView.as_view(),
+        name="invitation_cancel",
+    ),
+    path("api/workspace/close/", WorkspaceCloseView.as_view(), name="workspace_close"),
+    path("api/workspace/usage/", WorkspaceUsageView.as_view(), name="workspace_usage"),
+    # Property billing, tenant-scoped (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md).
+    # Tenant-scoped paths never touch GLOBAL_PATHS, so ordinary `<uuid:pk>`
+    # segments are safe here.
+    path("api/workspace/settings/", pv.WorkspaceSettingsView.as_view(), name="workspace_settings"),
+    path("api/workspace/overview/", pv.WorkspaceOverviewView.as_view(), name="workspace_overview"),
+    path("api/residency/", pv.ResidencyView.as_view(), name="residency"),
+    path("api/properties/", pv.PropertyListView.as_view(), name="property_list"),
+    path("api/properties/<uuid:pk>/", pv.PropertyDetailView.as_view(), name="property_detail"),
+    path("api/units/", pv.UnitListView.as_view(), name="unit_list"),
+    path("api/units/<uuid:pk>/", pv.UnitDetailView.as_view(), name="unit_detail"),
+    path("api/residents/", pv.ResidentListView.as_view(), name="resident_list"),
+    path("api/residents/<uuid:pk>/", pv.ResidentDetailView.as_view(), name="resident_detail"),
+    path("api/leases/", pv.LeaseListView.as_view(), name="lease_list"),
+    path("api/leases/<uuid:pk>/", pv.LeaseDetailView.as_view(), name="lease_detail"),
+    path("api/leases/<uuid:pk>/end/", pv.LeaseEndView.as_view(), name="lease_end"),
+    path("api/meters/", pv.MeterListView.as_view(), name="meter_list"),
+    path("api/meters/<uuid:pk>/", pv.MeterDetailView.as_view(), name="meter_detail"),
+    path("api/meter-readings/", pv.MeterReadingListView.as_view(), name="meter_reading_list"),
+    path(
+        "api/meter-readings/<uuid:pk>/",
+        pv.MeterReadingDetailView.as_view(),
+        name="meter_reading_detail",
+    ),
+    path(
+        "api/meter-readings/<uuid:pk>/proof/",
+        pv.MeterReadingProofView.as_view(),
+        name="meter_reading_proof",
+    ),
+    path(
+        "api/meter-readings/<uuid:pk>/correct/",
+        pv.MeterReadingCorrectView.as_view(),
+        name="meter_reading_correct",
+    ),
+    path("api/billing/tariffs/", pv.TariffListView.as_view(), name="tariff_list"),
+    path("api/billing/cycles/", pv.BillingCycleListView.as_view(), name="billing_cycle_list"),
+    path(
+        "api/billing/cycles/<uuid:pk>/",
+        pv.BillingCycleDetailView.as_view(),
+        name="billing_cycle_detail",
+    ),
+    path(
+        "api/billing/cycles/<uuid:pk>/generate/",
+        pv.BillingCycleGenerateView.as_view(),
+        name="billing_cycle_generate",
+    ),
+    path(
+        "api/billing/cycles/<uuid:pk>/publish/",
+        pv.BillingCyclePublishView.as_view(),
+        name="billing_cycle_publish",
+    ),
+    path(
+        "api/billing/cycles/<uuid:pk>/close/",
+        pv.BillingCycleCloseView.as_view(),
+        name="billing_cycle_close",
+    ),
+    path("api/billing/summary/", pv.BillingSummaryView.as_view(), name="billing_summary"),
+    path("api/billing/aging/", pv.BillingAgingView.as_view(), name="billing_aging"),
+    path("api/billing/reports/", pv.BillingReportView.as_view(), name="billing_reports"),
+    path(
+        "api/billing/reminders/run/",
+        pv.BillingRemindersRunView.as_view(),
+        name="billing_reminders_run",
+    ),
+    path("api/bills/", pv.BillListView.as_view(), name="bill_list"),
+    path("api/bills/<uuid:pk>/", pv.BillDetailView.as_view(), name="bill_detail"),
+    path(
+        "api/bills/<uuid:pk>/line-items/",
+        pv.BillLineItemListView.as_view(),
+        name="bill_line_items",
+    ),
+    path(
+        "api/bills/<uuid:pk>/line-items/<uuid:line_id>/",
+        pv.BillLineItemDetailView.as_view(),
+        name="bill_line_item_detail",
+    ),
+    path("api/bills/<uuid:pk>/publish/", pv.BillPublishView.as_view(), name="bill_publish"),
+    path("api/bills/<uuid:pk>/cancel/", pv.BillCancelView.as_view(), name="bill_cancel"),
+    path(
+        "api/bills/<uuid:pk>/corrections/",
+        pv.BillCorrectionView.as_view(),
+        name="bill_corrections",
+    ),
+    path("api/payments/", pv.PaymentListView.as_view(), name="payment_list"),
+    path("api/payments/<uuid:pk>/", pv.PaymentDetailView.as_view(), name="payment_detail"),
+    path("api/payments/<uuid:pk>/void/", pv.PaymentVoidView.as_view(), name="payment_void"),
+    path("api/receipts/", pv.ReceiptListView.as_view(), name="receipt_list"),
+    path("api/receipts/<uuid:pk>/", pv.ReceiptDetailView.as_view(), name="receipt_detail"),
     path(
         "api/subscriptions/current/",
         CurrentSubscriptionView.as_view(),

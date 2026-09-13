@@ -90,6 +90,37 @@ export const queryKeys = {
    */
   platformWebhookEventRaw: (id: string) =>
     ['global', 'platform', 'webhook-events', 'raw', id] as const,
+
+  /**
+   * Property billing (docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md) — every
+   * workspace-owned resource (properties, units, residents, leases, meters,
+   * readings, bills, payments, receipts, cycles, reports) is keyed UNDER the
+   * tenant id, so a workspace switch is a cache-key change and one workspace's
+   * bills can never render in another. `resource` names the endpoint family;
+   * params (filters, ids) are part of the key.
+   */
+  property: (
+    tenantId: string,
+    resource: string,
+    params: Record<string, string | undefined> | string = {},
+  ) => ['tenant', tenantId, 'property', resource, params] as const,
+  /** Invalidation prefix for everything property-billing in one workspace. */
+  propertyRoot: (tenantId: string) => ['tenant', tenantId, 'property'] as const,
+
+  /** The caller's own notifications / invitations / account — user-level, global. */
+  notifications: (params: Record<string, string | undefined> = {}) =>
+    ['global', 'notifications', params] as const,
+  notificationsUnread: () => ['global', 'notifications', 'unread'] as const,
+  notificationPreferences: () => ['global', 'notifications', 'preferences'] as const,
+  myInvitations: () => ['global', 'invitations', 'mine'] as const,
+  accountProfile: () => ['global', 'account', 'profile'] as const,
+  accountUsage: () => ['global', 'account', 'usage'] as const,
+
+  /** Platform-admin property billing — cross-workspace, 'global' like its siblings. */
+  platformPropertyBilling: (
+    resource: string,
+    params: Record<string, string | undefined> = {},
+  ) => ['global', 'platform', 'property-billing', resource, params] as const,
 } as const
 
 /** The prefix every tenant-scoped key starts with — used by tests and tooling. */

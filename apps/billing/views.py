@@ -26,7 +26,7 @@ from apps.billing.services import (
     WebhookProcessingService,
     WebhookService,
 )
-from apps.tenants.permissions import IsTenantMember, IsTenantOwner
+from apps.tenants.permissions import IsTenantMember, IsTenantOwner, RequiresCapability
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,8 @@ class CurrentSubscriptionView(APIView):
     subscription. Tenant-scoped: request.tenant / request.membership are
     resolved by TenantJWTAuthentication before this view runs.
 
-    Read is OWNER or MEMBER; change (plan / cancel) is OWNER only. Every
+    Read and change (plan / cancel) are OWNER only — a resident MEMBER is not a
+    Tenora subscriber (property-billing plan §16.5). Every
     mutation goes through SubscriptionService — the view never assigns
     .status or .plan directly.
 
@@ -71,7 +72,10 @@ class CurrentSubscriptionView(APIView):
     def get_permissions(self):
         if self.request.method == "PATCH":
             return [IsAuthenticated(), IsTenantOwner()]
-        return [IsAuthenticated(), IsTenantMember()]
+        # Property-billing plan §16.5: the Tenora subscription is the OWNER's
+        # relationship with Tenora. A resident member must not read it — not
+        # just hidden in the UI, refused here.
+        return [IsAuthenticated(), IsTenantMember(), RequiresCapability("subscription.view")()]
 
     def _subscription(self, request):
         # Scoped manager — the sanctioned mechanism, never .filter(tenant=).

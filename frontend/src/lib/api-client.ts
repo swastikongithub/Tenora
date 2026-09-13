@@ -28,11 +28,23 @@ interface RequestOptions {
   /** Extra headers. Merged over the client's own; the client's win for the ones it owns. */
   headers?: HeadersInit
   signal?: AbortSignal
+  /** Resolve the body as a Blob (an authorized image/PDF download) instead of JSON. */
+  asBlob?: boolean
 }
 
 const TENANT_BODY_KEYS = ['tenant_id', 'tenant', 'tenantId']
 
 function assertNoTenantInBody(body: Json): void {
+  // Property billing adds multipart uploads (meter-reading proof). A FormData
+  // body is checked by its field names, under exactly the same rule.
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    for (const key of TENANT_BODY_KEYS) {
+      if (body.has(key)) {
+        throw new Error(`Refusing to send "${key}" in a request body.`)
+      }
+    }
+    return
+  }
   if (body && typeof body === 'object' && !Array.isArray(body)) {
     for (const key of TENANT_BODY_KEYS) {
       if (key in (body as Record<string, unknown>)) {
@@ -85,11 +97,14 @@ async function request<T = unknown>(
   const global = isGlobalPath(djangoPathOnly)
   const noAuth = isNoAuthPath(djangoPathOnly)
   const hasBody = body !== undefined && body !== null
+  const isForm = typeof FormData !== 'undefined' && body instanceof FormData
 
   if (hasBody) assertNoTenantInBody(body)
 
   const headers = new Headers(options.headers)
-  if (hasBody && !headers.has('Content-Type')) {
+  // A FormData body gets no Content-Type from us: fetch sets the multipart
+  // boundary itself.
+  if (hasBody && !isForm && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
@@ -111,7 +126,7 @@ async function request<T = unknown>(
     response = await fetch(`${API_BASE_URL}${path}`, {
       method,
       headers,
-      body: hasBody ? JSON.stringify(body) : undefined,
+      body: hasBody ? (isForm ? (body as FormData) : JSON.stringify(body)) : undefined,
       signal: options.signal,
     })
   } catch (cause) {
@@ -136,6 +151,7 @@ async function request<T = unknown>(
     throw await toApiError(response)
   }
 
+  if (options.asBlob) return (await response.blob()) as T
   return parseBody<T>(response)
 }
 
@@ -148,6 +164,9 @@ export const apiClient = {
     request<T>('PATCH', path, body, options),
   delete: <T = unknown>(path: string, options?: RequestOptions) =>
     request<T>('DELETE', path, undefined, options),
+  /** Authorized binary download — same auth and tenant-header rules as every call. */
+  getBlob: (path: string, options?: RequestOptions) =>
+    request<Blob>('GET', path, undefined, { ...options, asBlob: true }),
 }
 
 export type ApiClient = typeof apiClient

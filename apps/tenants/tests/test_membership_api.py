@@ -14,7 +14,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
-from apps.tenants.models import Membership, Tenant
+from apps.tenants.models import Invitation, Membership, Tenant
 from apps.tenants.services import MembershipService
 from apps.users.models import User
 
@@ -95,13 +95,20 @@ class MembershipAPITests(APITestCase):
     # --- creation --------------------------------------------------------
 
     def test_owner_adds_existing_user_as_member(self):
+        # Property-billing plan §4.4 changed this contract: POST creates a
+        # PENDING invitation for a MEMBER seat, and NO membership exists until
+        # the invited user accepts it themselves.
         self._auth(self.owner, self.tenant.id)
         resp = self.client.post(URL, {"email": "outsider@example.com"})
 
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertEqual(resp.data["role"], Membership.Role.MEMBER)
-        m = Membership.objects.get(user=self.outsider, tenant=self.tenant)
-        self.assertEqual(m.role, Membership.Role.MEMBER)
+        self.assertEqual(resp.data["status"], Invitation.Status.PENDING)
+        invitation = Invitation.objects.get(invited_user=self.outsider, tenant=self.tenant)
+        self.assertEqual(invitation.role, Membership.Role.MEMBER)
+        self.assertFalse(
+            Membership.objects.filter(user=self.outsider, tenant=self.tenant).exists()
+        )
 
     def test_member_cannot_add_and_gets_403(self):
         self._auth(self.member, self.tenant.id)
@@ -121,8 +128,8 @@ class MembershipAPITests(APITestCase):
         )
 
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
-        m = Membership.objects.get(user=self.outsider, tenant=self.tenant)
-        self.assertEqual(m.role, Membership.Role.MEMBER)
+        invitation = Invitation.objects.get(invited_user=self.outsider, tenant=self.tenant)
+        self.assertEqual(invitation.role, Membership.Role.MEMBER)
 
     def test_tenant_id_in_body_is_ignored(self):
         self._auth(self.owner, self.tenant.id)
@@ -136,8 +143,13 @@ class MembershipAPITests(APITestCase):
 
         self.assertEqual(resp.status_code, status.HTTP_201_CREATED)
         self.assertTrue(
-            Membership.objects.filter(
-                user=self.outsider, tenant=self.tenant
+            Invitation.objects.filter(
+                invited_user=self.outsider, tenant=self.tenant
+            ).exists()
+        )
+        self.assertFalse(
+            Invitation.objects.filter(
+                invited_user=self.outsider, tenant=self.other_tenant
             ).exists()
         )
         self.assertFalse(

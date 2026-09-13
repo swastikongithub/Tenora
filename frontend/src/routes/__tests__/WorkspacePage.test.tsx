@@ -83,8 +83,10 @@ describe('WorkspacePage', () => {
       await screen.findByRole('button', { name: new RegExp(TENANT_B.name) }),
     )
 
+    // TENANT_B is a MEMBER (resident) workspace: since property billing a
+    // resident enters on their own dashboard, not the owner's overview.
     expect(
-      await screen.findByRole('heading', { name: 'Team' }),
+      await screen.findByRole('heading', { name: /^Welcome/ }),
     ).toBeInTheDocument()
     await waitFor(() =>
       expect(localStorage.getItem('billing.last_tenant_id')).toBe(TENANT_B.id),

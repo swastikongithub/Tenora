@@ -74,6 +74,28 @@ describe('Authorization header', () => {
   })
 })
 
+describe('multipart bodies (meter-reading proof uploads)', () => {
+  it('refuses a FormData body carrying a tenant field', async () => {
+    const form = new FormData()
+    form.set('tenant_id', 'tenant-b')
+    await expect(apiClient.post('/meter-readings/', form)).rejects.toThrow(/Refusing to send "tenant_id"/)
+  })
+
+  it('sends FormData as-is, without forcing a JSON content type', async () => {
+    let contentType: string | null = 'unset'
+    server.use(
+      http.post(api('/meter-readings/'), ({ request }) => {
+        contentType = request.headers.get('Content-Type')
+        return HttpResponse.json({ id: 'r' }, { status: 201 })
+      }),
+    )
+    const form = new FormData()
+    form.set('reading_value', '12')
+    await apiClient.post('/meter-readings/', form)
+    expect(contentType).not.toBe('application/json')
+  })
+})
+
 describe('X-Tenant-ID header — exact GLOBAL_PATHS match', () => {
   it('attaches the current tenant id to a tenant-scoped path', async () => {
     setCurrentTenantId('tenant-abc')

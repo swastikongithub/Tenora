@@ -156,7 +156,11 @@ describe('SubscriptionPage — current subscription panel', () => {
     ).toBeInTheDocument()
   })
 
-  it('MEMBER sees the no-subscription message without an action hint', async () => {
+  // Property-billing plan §16.5 changed this contract: a MEMBER is a resident,
+  // not a Tenora subscriber. The owner's subscription page is not rendered for
+  // them at all — they are sent to their own dashboard (and the backend refuses
+  // the subscription endpoint to a resident regardless).
+  it('redirects a MEMBER (resident) to their dashboard instead of the subscription page', async () => {
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_B]),
@@ -165,12 +169,8 @@ describe('SubscriptionPage — current subscription panel', () => {
     )
     renderSubscription(TENANT_B)
 
-    expect(
-      await screen.findByText('No active subscription'),
-    ).toBeInTheDocument()
-    expect(
-      screen.getByText('An owner of this workspace can start one.'),
-    ).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^Welcome/ })).toBeInTheDocument()
+    expect(screen.queryByText('No active subscription')).not.toBeInTheDocument()
   })
 
   it('shows a retry panel for a genuine failure, distinct from the 404 empty state', async () => {
@@ -581,7 +581,7 @@ describe('SubscriptionPage — OWNER cancel subscription', () => {
     expect(within(panel).getByRole('button', CANCEL_BTN)).toBeInTheDocument()
   })
 
-  it('hides the cancel control for a MEMBER', async () => {
+  it('never renders the cancel control for a MEMBER (they never reach the page)', async () => {
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_B]),
@@ -590,7 +590,7 @@ describe('SubscriptionPage — OWNER cancel subscription', () => {
     )
     renderSubscription(TENANT_B)
 
-    await findPanel()
+    await screen.findByRole('heading', { name: /^Welcome/ })
     expect(screen.queryByRole('button', CANCEL_BTN)).not.toBeInTheDocument()
   })
 
@@ -709,7 +709,11 @@ describe('SubscriptionPage — OWNER cancel subscription', () => {
 })
 
 describe('SubscriptionPage — MEMBER view', () => {
-  it('renders read-only: no radiogroup, no create/change affordance', async () => {
+  // Property-billing plan §16.5 changed this contract: a MEMBER is a resident,
+  // not a Tenora subscriber. The owner's subscription page is not rendered for
+  // them at all — they are sent to their own dashboard (and the backend refuses
+  // the subscription endpoint to a resident regardless).
+  it('shows a MEMBER no plan or subscription controls — they are redirected', async () => {
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_B]),
@@ -718,8 +722,7 @@ describe('SubscriptionPage — MEMBER view', () => {
     )
     renderSubscription(TENANT_B)
 
-    await findPanel()
-    await screen.findByText('Team')
+    await screen.findByRole('heading', { name: /^Welcome/ })
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
     expect(screen.queryByRole('radio')).not.toBeInTheDocument()
   })
@@ -733,8 +736,7 @@ describe('SubscriptionPage — MEMBER view', () => {
     )
     renderSubscription(TENANT_B)
 
-    await screen.findByText('No active subscription')
-    await screen.findByText('Team')
+    await screen.findByRole('heading', { name: /^Welcome/ })
     expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument()
   })
 })
@@ -826,11 +828,16 @@ describe('SubscriptionPage — error surfaces', () => {
 })
 
 describe('SubscriptionPage — tenant isolation (mixed global + tenant-scoped queries)', () => {
+  // Both workspaces are OWNED here: since property billing a resident never
+  // reaches this page, and the invariant under test is cache isolation across
+  // a switch, not the role of the second workspace.
+  const TENANT_B_OWNER = { ...TENANT_B, role: 'OWNER' as const }
+
   it('switching tenant refetches the subscription but never the global plan list', async () => {
     let plansCalls = 0
     server.use(
       ...authHandlers(),
-      tenantsMeHandler([TENANT_A, TENANT_B]),
+      tenantsMeHandler([TENANT_A, TENANT_B_OWNER]),
       currentSubscriptionByTenantHandler({
         [TENANT_A.id]: subscriptionFor(PLAN_PRO, 'ACTIVE'),
         [TENANT_B.id]: subscriptionFor(PLAN_TEAM, 'TRIALING'),

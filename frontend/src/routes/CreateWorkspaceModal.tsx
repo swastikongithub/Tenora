@@ -76,7 +76,11 @@ export function CreateWorkspaceModal({
       setFormError(
         cause instanceof ApiError && cause.status === 0
           ? 'Couldn’t reach the server. Check your connection and try again.'
-          : 'The server had a problem creating that workspace. Try again.',
+          : cause instanceof ApiError && cause.code === 'workspace_limit_reached'
+            ? // Property-billing plan §17.1: the server refused because the
+              // owner's plan is at its workspace limit — say so plainly.
+              cause.message
+            : 'The server had a problem creating that workspace. Try again.',
       )
     }
   }

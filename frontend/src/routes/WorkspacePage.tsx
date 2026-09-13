@@ -46,7 +46,9 @@ export function WorkspacePage() {
 
   function enter(tenantId: string) {
     switchTenant(tenantId)
-    navigate('/overview', { replace: true })
+    // A resident lands on their own dashboard; an owner on the overview.
+    const role = tenants.find((t) => t.id === tenantId)?.role
+    navigate(role === 'MEMBER' ? '/home' : '/overview', { replace: true })
   }
 
   function handleCreated(tenant: TenantMembership) {

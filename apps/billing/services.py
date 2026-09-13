@@ -801,10 +801,15 @@ class UsageMeteringService:
     def _count(metric, tenant):
         """The real current quantity of `metric` for `tenant`."""
         if metric == UsageRecord.Metric.ACTIVE_MEMBERS:
-            # Every Membership row is an occupied seat — there is no is_active
-            # flag and no removal path. Not filtered by `user.is_active` (an
-            # admin-disable, orthogonal to seat occupancy).
-            return Membership.objects.for_tenant(tenant).count()
+            # Every ACTIVE Membership row is an occupied seat. Since property
+            # billing, a membership can end (LEFT / REMOVED); an ended row is no
+            # longer a seat. Not filtered by `user.is_active` (an admin-disable,
+            # orthogonal to seat occupancy).
+            return (
+                Membership.objects.for_tenant(tenant)
+                .filter(status=Membership.Status.ACTIVE)
+                .count()
+            )
         raise ValueError(f"No counter defined for metric {metric!r}")
 
     @staticmethod

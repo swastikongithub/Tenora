@@ -1,4 +1,5 @@
-from rest_framework import status
+from django.core.exceptions import ValidationError as DjangoValidationError
+from rest_framework import serializers, status
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
@@ -14,6 +15,13 @@ from apps.users.serializers import (
     ResendVerificationSerializer,
     UserSerializer,
     VerifyEmailSerializer,
+)
+from apps.users.account import (
+    AccountService,
+    ConfirmationMismatch,
+    InvalidCurrentPassword,
+    LastRootAccount,
+    OwnsWorkspaces,
 )
 from apps.users.email_delivery import EmailDeliveryError
 from apps.users.services import (
@@ -249,4 +257,108 @@ class LogoutView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        return Response(status=status.HTTP_200_OK)
+
+class AccountProfileSerializer(serializers.Serializer):
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    phone = serializers.RegexField(r"^[0-9+()\-\s]{0,32}$", required=False, allow_blank=True)
+
+
+class PasswordChangeSerializer(serializers.Serializer):
+    current_password = serializers.CharField(required=False, allow_blank=True, default="")
+    new_password = serializers.CharField()
+
+
+class AccountDeleteSerializer(serializers.Serializer):
+    confirmation = serializers.CharField()
+
+
+def _profile_body(user):
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "phone": user.phone,
+        "has_usable_password": user.has_usable_password(),
+        "date_joined": user.date_joined,
+        "deletion_blockers": AccountService.deletion_blockers(user),
+    }
+
+
+class AccountProfileView(APIView):
+    """GET/PATCH /api/account/profile/ — the caller's own profile (global path)."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(_profile_body(request.user))
+
+    def patch(self, request):
+        serializer = AccountProfileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = AccountService.update_profile(user=request.user, changes=serializer.validated_data)
+        return Response(_profile_body(user))
+
+
+class AccountPasswordView(APIView):
+    """POST /api/account/password/ — change (or, for a Google-only account, set) the password."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PasswordChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            AccountService.change_password(
+                user=request.user,
+                current_password=serializer.validated_data["current_password"],
+                new_password=serializer.validated_data["new_password"],
+            )
+        except InvalidCurrentPassword:
+            return Response(
+                {"current_password": ["The current password is incorrect."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except DjangoValidationError as exc:
+            return Response({"new_password": list(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(status=status.HTTP_200_OK)
+
+
+class AccountDeleteView(APIView):
+    """POST /api/account/delete/ — {confirmation: <your email>}. Destructive:
+    anonymizes and deactivates the account; see apps/users/account.py."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = AccountDeleteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            AccountService.delete_account(
+                user=request.user, confirmation=serializer.validated_data["confirmation"]
+            )
+        except ConfirmationMismatch:
+            return Response(
+                {"confirmation": ["Type your account email exactly to confirm."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except OwnsWorkspaces as exc:
+            return Response(
+                {
+                    "detail": (
+                        "You still own workspaces. Transfer ownership or close them "
+                        "before deleting your account."
+                    ),
+                    "code": "owns_workspaces",
+                    "workspaces": exc.workspaces,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        except LastRootAccount:
+            return Response(
+                {"detail": "The last platform root account cannot be deleted.", "code": "last_root"},
+                status=status.HTTP_409_CONFLICT,
+            )
         return Response(status=status.HTTP_200_OK)
