@@ -16,6 +16,7 @@ from apps.properties.gateway.base import (
     CreatedOrder,
     GatewayRejected,
     GatewayUnavailable,
+    IdempotencyConflict,
     OrderAlreadyExists,
     PropertyPaymentGateway,
     ProviderOrderState,
@@ -129,4 +130,4 @@ class MockPropertyPaymentGateway(PropertyPaymentGateway):
         return CashfreePropertyPaymentGateway(client_id="mock", environment="sandbox")
 
 
-__all__ = ["MockPropertyPaymentGateway", "GatewayRejected", "GatewayUnavailable"]
+__all__ = ["MockPropertyPaymentGateway", "GatewayRejected", "GatewayUnavailable", "IdempotencyConflict"]

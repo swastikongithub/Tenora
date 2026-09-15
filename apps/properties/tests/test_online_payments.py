@@ -19,7 +19,7 @@ from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from apps.properties.gateway.base import GatewayRejected, GatewayUnavailable, ProviderPaymentStatus
+from apps.properties.gateway.base import GatewayRejected, GatewayUnavailable, IdempotencyConflict, ProviderPaymentStatus
 from apps.properties.gateway.mock import MockPropertyPaymentGateway
 from apps.properties.models import Bill, OnlinePaymentAttempt, Payment, PropertyPaymentWebhookEvent, Receipt
 from apps.properties.online_payments import OnlinePaymentService
@@ -208,6 +208,50 @@ class OrderCreationTests(OnlinePaymentTestBase):
         self.assertEqual(failed.status, OnlinePaymentAttempt.Status.FAILED)
         new = self.start().data
         self.assertNotEqual(new["id"], str(failed.id))
+
+    def test_a_concurrent_idempotency_conflict_never_fails_the_checkout(self):
+        # Sandbox-observed: two start requests racing for one checkout; Cashfree
+        # answers the second (same x-idempotency-key) with a 422 while the first
+        # is in flight. The checkout must survive and the caller is told to retry.
+        self.as_resident()
+        MockPropertyPaymentGateway.state.fail_next = IdempotencyConflict("invalid body in request for x-idempotency-key")
+        resp = self.start(expect=409)
+        self.assertEqual(resp.data["code"], "PAYMENT_IN_PROGRESS")
+        attempt = OnlinePaymentAttempt.objects.get()
+        self.assertEqual(attempt.status, OnlinePaymentAttempt.Status.CREATED)
+        # The racing request finishes: the retry now gets the same, payable checkout.
+        data = self.start().data
+        self.assertEqual(data["id"], str(attempt.id))
+        self.assertEqual(data["status"], "ACTIVE")
+        self.assertTrue(data["payment_session_id"])
+
+    def test_a_conflict_whose_order_already_exists_reuses_it(self):
+        self.as_resident()
+        MockPropertyPaymentGateway.state.fail_next = GatewayUnavailable("timeout")
+        self.start(expect=503)
+        attempt = OnlinePaymentAttempt.objects.get()
+        # The first call actually created the order at the provider.
+        MockPropertyPaymentGateway().create_payment_order(
+            order_id=attempt.provider_order_id, amount_cents=attempt.amount_cents, currency="INR",
+            customer=None, expires_at=attempt.expires_at, return_url="", notify_url="", note="", tags={},
+            idempotency_key="other-key",
+        )
+        MockPropertyPaymentGateway.state.fail_next = IdempotencyConflict("in flight")
+        data = self.start().data
+        self.assertEqual((data["id"], data["status"]), (str(attempt.id), "ACTIVE"))
+
+    def test_a_checkout_stuck_unconfirmed_is_replaced_not_retried_forever(self):
+        self.as_resident()
+        MockPropertyPaymentGateway.state.fail_next = GatewayUnavailable("timeout")
+        self.start(expect=503)
+        stuck = OnlinePaymentAttempt.objects.get()
+        OnlinePaymentAttempt.objects.filter(pk=stuck.pk).update(created_at=timezone.now() - timedelta(minutes=5))
+        MockPropertyPaymentGateway.state.fail_next = IdempotencyConflict("invalid body")
+        self.start(expect=409)
+        self.assertEqual(OnlinePaymentAttempt.objects.get(pk=stuck.pk).status, OnlinePaymentAttempt.Status.EXPIRED)
+        fresh = self.start().data
+        self.assertNotEqual(fresh["id"], str(stuck.id))
+        self.assertEqual(fresh["status"], "ACTIVE")
 
     def test_a_changed_bill_replaces_the_open_checkout(self):
         self.as_resident()

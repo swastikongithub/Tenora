@@ -42,6 +42,7 @@ from apps.properties.gateway.base import (
     CreatedOrder,
     GatewayRejected,
     GatewayUnavailable,
+    IdempotencyConflict,
     OrderAlreadyExists,
     PropertyPaymentGateway,
     ProviderOrderState,
@@ -201,6 +202,11 @@ class CashfreePropertyPaymentGateway(PropertyPaymentGateway):
         status, payload = self._request("POST", "/orders", body=body, idempotency_key=idempotency_key)
         if status == 409 and isinstance(payload, dict) and payload.get("code") == "order_already_exists":
             raise OrderAlreadyExists(order_id)
+        if status == 422 and idempotency_key:
+            # Seen in sandbox when two start requests for the same checkout race:
+            # the second call with the same x-idempotency-key is refused while the
+            # first is in flight. The order may still be created by the first call.
+            raise IdempotencyConflict(_safe_message(payload) or "idempotency conflict")
         if status >= 500 or status == 429:
             raise GatewayUnavailable(f"HTTP {status}")
         if status >= 400 or not isinstance(payload, dict):

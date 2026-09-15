@@ -45,6 +45,7 @@ from apps.properties.gateway.base import (
     CustomerDetails,
     GatewayRejected,
     GatewayUnavailable,
+    IdempotencyConflict,
     OrderAlreadyExists,
     ProviderPayment,
     ProviderPaymentStatus,
@@ -68,6 +69,9 @@ SUPPORTED_CURRENCY = "INR"
 MIN_REMAINING = timedelta(minutes=3)
 #: Status reads on the return page query the provider at most this often.
 RECHECK_INTERVAL = timedelta(seconds=10)
+#: A CREATED checkout whose provider order still can't be confirmed after this
+#: long is replaced rather than retried with the same idempotency key forever.
+STUCK_CREATE_AFTER = timedelta(seconds=60)
 FAILED_PAYMENT_STATUSES = {
     ProviderPaymentStatus.FAILED,
     ProviderPaymentStatus.USER_DROPPED,
@@ -274,12 +278,32 @@ class OnlinePaymentService:
                 idempotency_key=str(attempt.idempotency_key),
             )
             session_id, order_ref = created.payment_session_id, created.provider_order_ref
-        except OrderAlreadyExists:
+        except (OrderAlreadyExists, IdempotencyConflict) as exc:
+            # Another request for this same checkout created (or is creating) the
+            # order. Read it back; if it isn't readable yet, report "in progress"
+            # WITHOUT failing the attempt — the concurrent request will finish it.
+            in_progress = isinstance(exc, IdempotencyConflict)
             try:
                 state = gateway.get_order(attempt.provider_order_id)
             except GatewayUnavailable:
                 state = None
             if state is None or not state.payment_session_id:
+                if in_progress:
+                    if timezone.now() - attempt.created_at > STUCK_CREATE_AFTER:
+                        # Still unconfirmed long after the first try: stop reusing
+                        # this key so the next click starts a fresh checkout.
+                        with transaction.atomic():
+                            locked = OnlinePaymentAttempt.objects.select_for_update().get(pk=attempt.pk)
+                            if locked.status == S.CREATED:
+                                locked.status = S.EXPIRED
+                                locked.failure_message = "The checkout couldn’t be confirmed and was replaced."
+                                locked.finalized_at = timezone.now()
+                                locked.save(update_fields=["status", "failure_message", "finalized_at", "updated_at"])
+                    raise DomainError(
+                        "PAYMENT_IN_PROGRESS",
+                        "This payment is already being started. Try again in a moment.",
+                        status_code=409,
+                    )
                 raise DomainError("PAYMENT_PROVIDER_UNAVAILABLE", "Couldn’t reach the payment provider. Try again.", status_code=503)
             session_id, order_ref = state.payment_session_id, ""
         except GatewayRejected as exc:
@@ -307,7 +331,11 @@ class OnlinePaymentService:
                 locked.payment_session_id = session_id
                 locked.provider_order_ref = order_ref or locked.provider_order_ref
                 locked.save(update_fields=["status", "payment_session_id", "provider_order_ref", "updated_at"])
-        return OnlinePaymentAttempt.objects.select_related("bill", "payment").get(pk=attempt.pk)
+        attempt = OnlinePaymentAttempt.objects.select_related("bill", "payment").get(pk=attempt.pk)
+        if attempt.status != S.ACTIVE or not attempt.payment_session_id:
+            # Never hand the browser a checkout that isn't payable.
+            raise DomainError("PAYMENT_IN_PROGRESS", "This payment couldn’t be started. Try again.", status_code=409)
+        return attempt
 
     # --- settlement ---------------------------------------------------------------
 

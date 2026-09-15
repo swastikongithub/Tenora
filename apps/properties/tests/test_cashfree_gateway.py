@@ -17,6 +17,7 @@ from apps.properties.gateway.base import (
     CustomerDetails,
     GatewayRejected,
     GatewayUnavailable,
+    IdempotencyConflict,
     OrderAlreadyExists,
     ProviderOrderStatus,
     ProviderPaymentStatus,
@@ -99,6 +100,7 @@ class CreateOrderTests(SimpleTestCase):
     def test_error_classification(self):
         cases = [
             (FakeResponse(409, {"code": "order_already_exists", "message": "order with same id is already present"}), OrderAlreadyExists),
+            (FakeResponse(422, {"type": "idempotency_error", "code": "request_invalid", "message": "invalid body in request for x-idempotency-key"}), IdempotencyConflict),
             (FakeResponse(400, {"type": "invalid_request_error", "message": "customer_phone is invalid"}), GatewayRejected),
             (FakeResponse(401, {"type": "authentication_error", "message": "authentication Failed"}), GatewayRejected),
             (FakeResponse(500, {"type": "api_error"}), GatewayUnavailable),

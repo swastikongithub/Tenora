@@ -27,6 +27,13 @@ class GatewayUnavailable(Exception):
     idempotency key."""
 
 
+class IdempotencyConflict(GatewayUnavailable):
+    """The provider refused a request because another request with the same
+    idempotency key is still being processed (or was received with a different
+    body). The original operation may well succeed — never treat this as a
+    rejection; read the resource back or retry later with the same key."""
+
+
 class GatewayRejected(Exception):
     """The provider refused the request (validation, authentication, limits).
     Retrying the identical request will not help. `message` is safe to store."""
