@@ -5,55 +5,64 @@
 
 import { Navigate, Route, Routes } from 'react-router-dom'
 
-import { AdminLayout } from './admin/AdminLayout'
-import { AdminOverviewPage } from './admin/AdminOverviewPage'
-import { AuditLogPage } from './admin/AuditLogPage'
-import { BillingEventsPage } from './admin/BillingEventsPage'
-import { PlanDetailPage } from './admin/PlanDetailPage'
-import { PlansPage } from './admin/PlansPage'
-import {
-  PropertyBillAdminPage,
-  PropertyBillingAdminPage,
-  PropertyWorkspaceAdminPage,
-  PropertyWorkspaceBillsAdminPage,
-} from './admin/PropertyBillingPages'
-import { ReconciliationPage } from './admin/ReconciliationPage'
-import { TenantDetailPage } from './admin/TenantDetailPage'
-import { TenantsPage } from './admin/TenantsPage'
-import { UsersPage } from './admin/UsersPage'
-import { WebhooksPage } from './admin/WebhooksPage'
+import { lazyPage } from './lazy-page'
 import { LoginPage } from './LoginPage'
-import { MembersPage } from './MembersPage'
-import { NotificationsPage } from './NotificationsPage'
-import { OverviewPage } from './OverviewPage'
-import { BillDetailPage } from './property/BillDetailPage'
-import {
-  AgingPage,
-  BillingLayout,
-  BillingOverviewPage,
-  BillsPage,
-  ReadingsPage,
-  ReportsPage,
-  TariffsPage,
-} from './property/BillingPages'
-import { PaymentsPage, ReceiptPage, ReceiptsPage } from './property/PaymentPages'
-import { PortfolioPage } from './property/PortfolioPage'
-import {
-  OnboardingPage,
-  PropertiesPage,
-  PropertyDetailPage,
-  ResidentDetailPage,
-  ResidentsPage,
-  UnitDetailPage,
-} from './property/PropertyPages'
-import { ResidentBillsPage, ResidentHomePage } from './property/ResidentPages'
 import { ProtectedRoute } from './ProtectedRoute'
 import { RegisterPage } from './RegisterPage'
 import { NotForResidents, OwnerWorkspaceOnly, ResidentOnly } from './RoleRoute'
-import { SettingsPage } from './SettingsPage'
-import { SubscriptionPage } from './SubscriptionPage'
 import { VerifyEmailPage } from './VerifyEmailPage'
-import { WorkspacePage } from './WorkspacePage'
+
+// Route-level code splitting (landing plan H-D5). The public landing page, the
+// workspace app and the operator console each load only when first visited;
+// the auth pages and route guards stay in the entry chunk.
+const LandingPage = lazyPage(() => import('../landing/LandingPage'), 'LandingPage')
+
+const AdminLayout = lazyPage(() => import('./admin/AdminLayout'), 'AdminLayout')
+const AdminOverviewPage = lazyPage(() => import('./admin/AdminOverviewPage'), 'AdminOverviewPage')
+const AuditLogPage = lazyPage(() => import('./admin/AuditLogPage'), 'AuditLogPage')
+const BillingEventsPage = lazyPage(() => import('./admin/BillingEventsPage'), 'BillingEventsPage')
+const PlanDetailPage = lazyPage(() => import('./admin/PlanDetailPage'), 'PlanDetailPage')
+const PlansPage = lazyPage(() => import('./admin/PlansPage'), 'PlansPage')
+const PropertyBillAdminPage = lazyPage(() => import('./admin/PropertyBillingPages'), 'PropertyBillAdminPage')
+const PropertyBillingAdminPage = lazyPage(() => import('./admin/PropertyBillingPages'), 'PropertyBillingAdminPage')
+const PropertyWorkspaceAdminPage = lazyPage(() => import('./admin/PropertyBillingPages'), 'PropertyWorkspaceAdminPage')
+const PropertyWorkspaceBillsAdminPage = lazyPage(
+  () => import('./admin/PropertyBillingPages'),
+  'PropertyWorkspaceBillsAdminPage',
+)
+const ReconciliationPage = lazyPage(() => import('./admin/ReconciliationPage'), 'ReconciliationPage')
+const TenantDetailPage = lazyPage(() => import('./admin/TenantDetailPage'), 'TenantDetailPage')
+const TenantsPage = lazyPage(() => import('./admin/TenantsPage'), 'TenantsPage')
+const UsersPage = lazyPage(() => import('./admin/UsersPage'), 'UsersPage')
+const WebhooksPage = lazyPage(() => import('./admin/WebhooksPage'), 'WebhooksPage')
+
+const MembersPage = lazyPage(() => import('./MembersPage'), 'MembersPage')
+const NotificationsPage = lazyPage(() => import('./NotificationsPage'), 'NotificationsPage')
+const OverviewPage = lazyPage(() => import('./OverviewPage'), 'OverviewPage')
+const SettingsPage = lazyPage(() => import('./SettingsPage'), 'SettingsPage')
+const SubscriptionPage = lazyPage(() => import('./SubscriptionPage'), 'SubscriptionPage')
+const WorkspacePage = lazyPage(() => import('./WorkspacePage'), 'WorkspacePage')
+
+const BillDetailPage = lazyPage(() => import('./property/BillDetailPage'), 'BillDetailPage')
+const AgingPage = lazyPage(() => import('./property/BillingPages'), 'AgingPage')
+const BillingLayout = lazyPage(() => import('./property/BillingPages'), 'BillingLayout')
+const BillingOverviewPage = lazyPage(() => import('./property/BillingPages'), 'BillingOverviewPage')
+const BillsPage = lazyPage(() => import('./property/BillingPages'), 'BillsPage')
+const ReadingsPage = lazyPage(() => import('./property/BillingPages'), 'ReadingsPage')
+const ReportsPage = lazyPage(() => import('./property/BillingPages'), 'ReportsPage')
+const TariffsPage = lazyPage(() => import('./property/BillingPages'), 'TariffsPage')
+const PaymentsPage = lazyPage(() => import('./property/PaymentPages'), 'PaymentsPage')
+const ReceiptPage = lazyPage(() => import('./property/PaymentPages'), 'ReceiptPage')
+const ReceiptsPage = lazyPage(() => import('./property/PaymentPages'), 'ReceiptsPage')
+const PortfolioPage = lazyPage(() => import('./property/PortfolioPage'), 'PortfolioPage')
+const OnboardingPage = lazyPage(() => import('./property/PropertyPages'), 'OnboardingPage')
+const PropertiesPage = lazyPage(() => import('./property/PropertyPages'), 'PropertiesPage')
+const PropertyDetailPage = lazyPage(() => import('./property/PropertyPages'), 'PropertyDetailPage')
+const ResidentDetailPage = lazyPage(() => import('./property/PropertyPages'), 'ResidentDetailPage')
+const ResidentsPage = lazyPage(() => import('./property/PropertyPages'), 'ResidentsPage')
+const UnitDetailPage = lazyPage(() => import('./property/PropertyPages'), 'UnitDetailPage')
+const ResidentBillsPage = lazyPage(() => import('./property/ResidentPages'), 'ResidentBillsPage')
+const ResidentHomePage = lazyPage(() => import('./property/ResidentPages'), 'ResidentHomePage')
 
 export function AppRoutes() {
   return (
@@ -62,8 +71,13 @@ export function AppRoutes() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
 
-      <Route path="/" element={<ProtectedRoute />}>
-        <Route index element={<Navigate to="/overview" replace />} />
+      {/* Public marketing page (docs/TENORA_LANDING_PAGE_PLAN.md). Shown to
+          signed-in visitors too, with "Open workspace" in its nav (H-D2). */}
+      <Route path="/" element={<LandingPage />} />
+
+      {/* Every authenticated route. A pathless layout: the child paths below
+          resolve exactly as they did under the old "/" parent. */}
+      <Route element={<ProtectedRoute />}>
         <Route path="workspace" element={<WorkspacePage />} />
         <Route path="members" element={<MembersPage />} />
 
@@ -138,7 +152,10 @@ export function AppRoutes() {
         </Route>
       </Route>
 
-      <Route path="*" element={<Navigate to="/" replace />} />
+      {/* Unknown paths keep the destination they had before "/" became the
+          public landing page: signed out -> /login, owner -> /overview,
+          resident -> /home (via the guards). */}
+      <Route path="*" element={<Navigate to="/overview" replace />} />
     </Routes>
   )
 }

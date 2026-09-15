@@ -23,8 +23,10 @@
  */
 
 import type { ReactNode } from 'react'
+import { Link } from 'react-router-dom'
 
 import { Wordmark } from '../components/layout/Wordmark'
+import { ThemeToggle } from '../components/ThemeToggle'
 import { AuthArtPanel } from './AuthArtPanel'
 
 export interface AuthLayoutProps {
@@ -52,9 +54,19 @@ export function AuthLayout({
         headline={panelHeadline}
       />
 
-      <main className="flex flex-1 items-center justify-center px-5 py-12 sm:px-8 xl:border-l xl:border-subtle">
+      <main className="relative flex flex-1 items-center justify-center px-5 py-12 sm:px-8 xl:border-l xl:border-subtle">
+        {/* Theme toggle, top-right of the form column: out of the form's flow,
+            so the form's spacing and position are unchanged. */}
+        <ThemeToggle className="absolute right-5 top-5 sm:right-8" />
         <div className="w-full max-w-[400px]">
-          <Wordmark className="md:hidden" />
+          {/* Links back to the public landing page (landing plan H-D4). */}
+          <Link
+            to="/"
+            aria-label="Tenora home"
+            className="inline-flex rounded-sm focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-accent-600 md:hidden"
+          >
+            <Wordmark />
+          </Link>
           <h1 className="mt-8 text-display text-primary md:mt-0">{heading}</h1>
           <p className="mt-2 text-body text-secondary">{subheading}</p>
           {children}

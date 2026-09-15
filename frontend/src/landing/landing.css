@@ -1,0 +1,59 @@
+/*
+ * Public landing page styles that Tailwind utilities can't express cleanly.
+ * Loaded only with the lazily-imported landing route. No raw colours here —
+ * every value is a theme.css token (theme.css stays the only place raw colour
+ * values live).
+ */
+
+/* The ledger line: the page's single decorative device. A 1px accent rule. */
+.ledger-line {
+  background-color: var(--color-accent-600);
+}
+
+.ledger-line-soft {
+  background-color: color-mix(in srgb, var(--color-accent-600) 45%, transparent);
+}
+
+/* Hairline grid rule used between ledger rows. */
+.ledger-rule {
+  border-color: var(--color-subtle);
+}
+
+/* Anchor targets clear the sticky navigation. */
+.landing-anchor {
+  scroll-margin-top: 5rem;
+}
+
+/* Tab panel crossfade (§8). The global reduced-motion rule in theme.css cuts
+   the duration to ~0, so reduced-motion users get an instant swap. */
+@keyframes landing-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.landing-fade {
+  animation: landing-fade 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* Lenis recommended base styles (only take effect while Lenis is running,
+   because Lenis adds these classes to <html> itself). */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis:not(.lenis-autoToggle).lenis-stopped {
+  overflow: clip;
+}
+
+.lenis [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
+}

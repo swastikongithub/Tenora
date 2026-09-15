@@ -42,3 +42,5 @@ export type { SkeletonProps } from './Skeleton'
 
 export { Table } from './Table'
 export type { Column, SortDirection, TableProps } from './Table'
+
+export { ThemeToggle } from './ThemeToggle'

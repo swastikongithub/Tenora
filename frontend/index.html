@@ -4,7 +4,25 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Tenora</title>
+    <title>Tenora — Property Management &amp; Billing</title>
+    <meta
+      name="description"
+      content="Manage properties, residents, billing, payments and receipts from one workspace with Tenora."
+    />
+    <!-- Open Graph / social preview (landing plan §15, decision H-D3). The image
+         is a capture of Tenora's own landing hero rendered with sample data.
+         Relative URL: no canonical production origin is configured yet. -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Tenora" />
+    <meta property="og:title" content="Tenora — Property Management &amp; Billing" />
+    <meta
+      property="og:description"
+      content="Manage properties, residents, billing, payments and receipts from one workspace with Tenora."
+    />
+    <meta property="og:image" content="/og-tenora.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
     <!--
       Set data-theme before the first paint so there is no flash of the wrong
       theme (Stage C3b §4.1 / §8). Explicit stored choice wins; otherwise follow
@@ -48,6 +66,33 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Without JavaScript the app can't render; this keeps the public page's
+         essentials readable and its links usable (landing plan §J). -->
+    <noscript>
+      <main style="max-width:44rem;margin:0 auto;padding:3rem 1.5rem;font-family:system-ui,sans-serif;line-height:1.6">
+        <p><strong>TENORA</strong></p>
+        <h1>Property management, without the paperwork.</h1>
+        <p>
+          Manage properties, residents, rent, electricity, bills, payments and receipts from one
+          workspace.
+        </p>
+        <ul>
+          <li>Properties, units, residents and leases in one workspace</li>
+          <li>Electricity billed from meter readings and your tariff, explained on every bill</li>
+          <li>Payments recorded against bills, with a numbered receipt for each</li>
+          <li>Overdue balances grouped by age, and billing reports</li>
+          <li>Residents see only their own bills, history and receipts</li>
+        </ul>
+        <p>
+          Plans: Basic — up to 2 workspaces and 10 active members per workspace. Pro — up to 20
+          workspaces and 20 active members per workspace.
+        </p>
+        <p>
+          Tenora needs JavaScript to run. <a href="/register">Get started</a> ·
+          <a href="/login">Sign in</a>
+        </p>
+      </main>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
