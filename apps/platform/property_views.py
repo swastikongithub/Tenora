@@ -62,6 +62,11 @@ def _not_found():
     return Response(status=status.HTTP_404_NOT_FOUND)
 
 
+def _with_tenant_names(rows):
+    names = dict(Tenant.objects.filter(pk__in={r["tenant_id"] for r in rows}).values_list("id", "name"))
+    return [{**r, "tenant_name": names.get(parse_uuid_or_none(r["tenant_id"]), "")} for r in rows]
+
+
 class _StaffView(APIView):
     permission_classes = [IsAuthenticated, IsPlatformStaff]
 
@@ -107,7 +112,9 @@ class PlatformPropertyBillingSummaryView(_StaffView):
                 "electricity_units": str(units or 0),
                 "aging": aging_report["buckets"],
                 "current_period": reporting.period_summary(bills, start, today),
-                "monthly": reporting.monthly_series(bills, payments, today, 6),
+                "monthly": reporting.monthly_series(bills, payments, today, 12),
+                "electricity_by_unit": _with_tenant_names(reporting.electricity_by_unit(bills, start)),
+                "period": start.strftime("%Y-%m"),
             }
         )
 

@@ -31,8 +31,10 @@ import type {
   Bill,
   BillingCycle,
   CycleProgress,
+  ElectricityUnitRow,
   Meter,
   MeterReading,
+  MonthlyReportRow,
   Paginated,
   PeriodSummary,
   Tariff,
@@ -42,6 +44,7 @@ import type {
 import { BillTable } from './BillTable'
 import { ProofButton } from './BillDetailView'
 import { OnboardingBanner } from './OnboardingBanner'
+import { ElectricityByUnitTable, MonthlyReportTables } from './ReportTables'
 import { PageHeader, QueryState, Section, Select, StatGrid, StatTile, SubNav, TextArea } from './ui'
 import { errorMessage, fieldError } from '../../lib/property/errors'
 
@@ -641,18 +644,8 @@ export function TariffsPage() {
 
 interface ReportData {
   period: string
-  monthly: Array<{
-    period: string
-    billed_cents: number
-    collected_cents: number
-    outstanding_cents: number
-    rent_billed_cents: number
-    electricity_billed_cents: number
-    other_billed_cents: number
-    electricity_units: string
-    cash_received_cents: number
-  }>
-  electricity_by_unit: Array<{ property_name: string; unit_identifier: string; units: string; amount_cents: number }>
+  monthly: MonthlyReportRow[]
+  electricity_by_unit: ElectricityUnitRow[]
 }
 
 export function ReportsPage() {
@@ -664,24 +657,7 @@ export function ReportsPage() {
       <QueryState isLoading={report.isLoading} error={report.error} onRetry={() => report.refetch()} label="reports" />
       {report.data && (
         <>
-          <Section title="Last 12 months">
-            <Table
-              caption="Monthly billing report"
-              rows={[...report.data.monthly].reverse()}
-              rowKey={(r) => r.period}
-              columns={[
-                { key: 'period', header: 'Month', render: (r) => formatPeriod(`${r.period}-01`) },
-                { key: 'billed', header: 'Billed', numeric: true, render: (r) => money(r.billed_cents, currency) },
-                { key: 'collected', header: 'Collected', numeric: true, render: (r) => money(r.collected_cents, currency) },
-                { key: 'outstanding', header: 'Outstanding', numeric: true, render: (r) => money(r.outstanding_cents, currency) },
-                { key: 'rent', header: 'Rent', numeric: true, render: (r) => money(r.rent_billed_cents, currency) },
-                { key: 'elec', header: 'Electricity', numeric: true, render: (r) => money(r.electricity_billed_cents, currency) },
-                { key: 'other', header: 'Other', numeric: true, render: (r) => money(r.other_billed_cents, currency) },
-                { key: 'units', header: 'Units', numeric: true, render: (r) => formatDecimal(r.electricity_units) },
-                { key: 'cash', header: 'Cash received', numeric: true, render: (r) => money(r.cash_received_cents, currency) },
-              ]}
-            />
-          </Section>
+          <MonthlyReportTables monthly={report.data.monthly} currency={currency} title="Last 12 months" />
           <Section
             title="Electricity by unit"
             actions={
@@ -690,20 +666,7 @@ export function ReportsPage() {
               </div>
             }
           >
-            {report.data.electricity_by_unit.length === 0 ? (
-              <p className="text-body text-secondary">No issued electricity charges for this month.</p>
-            ) : (
-              <Table
-                caption="Electricity by unit"
-                rows={report.data.electricity_by_unit}
-                rowKey={(r) => `${r.property_name}-${r.unit_identifier}`}
-                columns={[
-                  { key: 'unit', header: 'Unit', render: (r) => `${r.unit_identifier} · ${r.property_name}` },
-                  { key: 'units', header: 'Units', numeric: true, render: (r) => formatDecimal(r.units) },
-                  { key: 'amount', header: 'Amount', numeric: true, render: (r) => money(r.amount_cents, currency) },
-                ]}
-              />
-            )}
+            <ElectricityByUnitTable rows={report.data.electricity_by_unit} currency={currency} />
           </Section>
         </>
       )}

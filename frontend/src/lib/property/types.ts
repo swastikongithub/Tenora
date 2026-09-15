@@ -314,6 +314,33 @@ export interface AgingReport {
   rows: AgingRow[]
 }
 
+/** One month of GET /api/billing/reports/ (and the platform summary's `monthly`). */
+export interface MonthlyReportRow {
+  period: string
+  billed_cents: number
+  collected_cents: number
+  outstanding_cents: number
+  rent_billed_cents: number
+  electricity_billed_cents: number
+  other_billed_cents: number
+  /** Collected by type counts PAID bills only; part-payments are `collected_unallocated_cents`. */
+  rent_collected_cents: number
+  electricity_collected_cents: number
+  other_collected_cents: number
+  collected_unallocated_cents: number
+  electricity_units: string
+  cash_received_cents: number
+}
+
+export interface ElectricityUnitRow {
+  tenant_id: string
+  tenant_name?: string
+  property_name: string
+  unit_identifier: string
+  units: string
+  amount_cents: number
+}
+
 export type AgingBucketTotal = { key: AgingBucket; label: string; amount_cents: number; count: number }
 
 /** GET /api/account/billing-portfolio/ — one row per workspace the owner controls. */

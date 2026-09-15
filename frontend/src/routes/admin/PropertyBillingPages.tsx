@@ -15,11 +15,24 @@ import { useCurrentUser } from '../../components/layout/use-current-user'
 import { apiClient } from '../../lib/api-client'
 import { formatDay, formatDecimal, money } from '../../lib/property/format'
 import { toQueryString } from '../../lib/property/hooks'
-import type { AgingReport, Bill, BillDetail, Lease, Paginated, PeriodSummary, Property, Resident, Unit } from '../../lib/property/types'
+import type {
+  AgingReport,
+  Bill,
+  BillDetail,
+  ElectricityUnitRow,
+  Lease,
+  MonthlyReportRow,
+  Paginated,
+  PeriodSummary,
+  Property,
+  Resident,
+  Unit,
+} from '../../lib/property/types'
 import { queryKeys } from '../../lib/query-keys'
 import { AgingView } from '../property/BillingPages'
 import { BillDetailView } from '../property/BillDetailView'
 import { BillTable } from '../property/BillTable'
+import { ElectricityByUnitTable, MonthlyReportTables } from '../property/ReportTables'
 import { PageHeader, QueryState, Section, Select, StatGrid, StatTile } from '../property/ui'
 import { errorMessage } from '../../lib/property/errors'
 
@@ -44,6 +57,9 @@ interface GlobalSummary {
   total_payments_cents: number
   electricity_units: string
   current_period: PeriodSummary
+  period?: string
+  monthly?: MonthlyReportRow[]
+  electricity_by_unit?: ElectricityUnitRow[]
 }
 
 interface WorkspaceRow {
@@ -79,7 +95,7 @@ export function PropertyBillingAdminPage() {
     period: params.get('period') ?? undefined,
     tenant: params.get('tenant') ?? undefined,
   }
-  const summary = usePlatform<GlobalSummary>('summary', '/platform/property-billing/summary/', { tenant: filters.tenant })
+  const summary = usePlatform<GlobalSummary>('summary', '/platform/property-billing/summary/', { tenant: filters.tenant, period: filters.period })
   const workspaces = usePlatform<Paginated<WorkspaceRow>>('workspaces', '/platform/property-billing/workspaces/')
   const bills = usePlatform<Paginated<Bill>>('bills', '/platform/property-billing/bills/', filters)
   const set = (key: string, value: string) => {
@@ -127,6 +143,19 @@ export function PropertyBillingAdminPage() {
           />
         )}
       </Section>
+
+      {s?.monthly && (
+        <MonthlyReportTables
+          monthly={s.monthly}
+          currency={CURRENCY}
+          title={filters.tenant ? 'Last 12 months · selected workspace' : 'Last 12 months · all workspaces'}
+        />
+      )}
+      {s?.electricity_by_unit && (
+        <Section title="Electricity by unit">
+          <ElectricityByUnitTable rows={s.electricity_by_unit} currency={CURRENCY} showWorkspace={!filters.tenant} />
+        </Section>
+      )}
 
       <Section title="Search bills">
         <form className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-5" onSubmit={(e) => e.preventDefault()} aria-label="Global bill filters">

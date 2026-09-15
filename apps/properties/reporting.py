@@ -11,6 +11,14 @@ Definitions:
     collected     sum(amount_paid_cents) of those bills
     outstanding   billed - collected
     overdue       outstanding on open bills past their due date (see aging.py)
+
+Collected by charge type (rent / electricity / other): payments are recorded
+against a whole bill, not against its lines, so a part-payment cannot be split
+between rent and electricity without inventing an allocation rule. Only a PAID
+bill's lines are known to be collected in full; those are reported per type
+(adjustments and discounts sit in "other", as they do in billed). Money received
+on bills still partly paid is reported as `collected_unallocated_cents`. The
+four always add up to `collected_cents`.
 """
 
 import calendar
@@ -97,31 +105,41 @@ def monthly_series(bills_qs, payments_qs, today, months=12):
             "rent_billed_cents": 0,
             "electricity_billed_cents": 0,
             "other_billed_cents": 0,
+            "rent_collected_cents": 0,
+            "electricity_collected_cents": 0,
+            "other_collected_cents": 0,
+            "collected_unallocated_cents": 0,
             "electricity_units": 0,
             "cash_received_cents": 0,
         }
     bills = bills_qs.filter(status__in=ISSUED, period_start__gte=first)
-    for b in bills.only("period_start", "total_cents", "amount_paid_cents"):
+    for b in bills.only("period_start", "status", "total_cents", "amount_paid_cents"):
         row = rows.get(b.period_start)
         if row is None:
             continue
         row["billed_cents"] += b.total_cents
         row["collected_cents"] += b.amount_paid_cents
         row["outstanding_cents"] += b.total_cents - b.amount_paid_cents
+        if b.status != Bill.Status.PAID:
+            row["collected_unallocated_cents"] += b.amount_paid_cents
     lines = BillLineItem.objects.filter(bill__in=bills).values(
-        "bill__period_start", "type", "amount_cents", "quantity"
+        "bill__period_start", "bill__status", "type", "amount_cents", "quantity"
     )
     for line in lines:
         row = rows.get(line["bill__period_start"])
         if row is None:
             continue
+        paid = line["bill__status"] == Bill.Status.PAID
         if line["type"] == BillLineItem.Type.RENT:
-            row["rent_billed_cents"] += line["amount_cents"]
+            kind = "rent"
         elif line["type"] == BillLineItem.Type.ELECTRICITY:
-            row["electricity_billed_cents"] += line["amount_cents"]
+            kind = "electricity"
             row["electricity_units"] += line["quantity"] or 0
         else:
-            row["other_billed_cents"] += line["amount_cents"]
+            kind = "other"
+        row[f"{kind}_billed_cents"] += line["amount_cents"]
+        if paid:
+            row[f"{kind}_collected_cents"] += line["amount_cents"]
     for p in payments_qs.filter(status=Payment.Status.COMPLETED, payment_date__gte=first).only(
         "payment_date", "amount_cents"
     ):
@@ -145,10 +163,18 @@ def electricity_by_unit(bills_qs, period_start):
         .order_by("bill__property_name", "bill__unit_identifier")
     )
     for line in lines:
-        key = (line.bill.property_name, line.bill.unit_identifier)
+        # Keyed by workspace too: platform views pass bills from many workspaces,
+        # where two "Building A / 101" units are different units.
+        key = (line.bill.tenant_id, line.bill.property_name, line.bill.unit_identifier)
         row = totals.setdefault(
             key,
-            {"property_name": key[0], "unit_identifier": key[1], "units": 0, "amount_cents": 0},
+            {
+                "tenant_id": str(key[0]),
+                "property_name": key[1],
+                "unit_identifier": key[2],
+                "units": 0,
+                "amount_cents": 0,
+            },
         )
         row["units"] += line.quantity or 0
         row["amount_cents"] += line.amount_cents
