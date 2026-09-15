@@ -11,6 +11,7 @@ import { ApiError } from '../../lib/api-error'
 import { METHOD_LABEL, formatDay, formatPeriod, money } from '../../lib/property/format'
 import { usePropertyQuery, useWorkspaceRole } from '../../lib/property/hooks'
 import type { Paginated, Payment, Receipt } from '../../lib/property/types'
+import { OnlinePaymentsNeedingRefund } from './OnlinePayment'
 import { DownloadPdfButton, PageHeader, QueryState, Section, SubNav } from './ui'
 
 export function PaymentsPage() {
@@ -28,6 +29,7 @@ export function PaymentsPage() {
           <Input label="Search resident, reference or bill" value={search} onChange={(e) => setParams(e.target.value ? { search: e.target.value } : {}, { replace: true })} />
         </div>
       )}
+      {isOwner && <OnlinePaymentsNeedingRefund />}
       <QueryState isLoading={payments.isLoading} error={payments.error} onRetry={() => payments.refetch()} label="payments" />
       {payments.data?.results.length === 0 && (
         <EmptyState headline="No payments yet" description={isOwner ? 'Record a payment from a published bill.' : 'Payments recorded by your property owner appear here.'} />

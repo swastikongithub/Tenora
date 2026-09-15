@@ -24,6 +24,7 @@ PREFERENCE_FOR_KIND = {
     K.PAYMENT_RECORDED: "payments",
     K.PAYMENT_VOIDED: "payments",
     K.RECEIPT_ISSUED: "payments",
+    K.ONLINE_PAYMENT_UNAPPLIED: "payments",
 }
 
 

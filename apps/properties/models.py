@@ -706,3 +706,123 @@ class Receipt(models.Model):
             )
         ]
         indexes = [models.Index(fields=["tenant", "issued_at"])]
+
+
+class OnlinePaymentAttempt(TimestampedModel):
+    """
+    One resident checkout of one bill through the property-payment gateway (P9).
+
+    Transient provider state lives here, never on `Payment`: an attempt can be
+    created, expire, fail, be retried, or capture money that can no longer be
+    applied. Only a verified capture that still fits the bill turns into the
+    canonical `Payment` (method ONLINE) + `Receipt`, via `PaymentService.record`,
+    and this row points at it.
+
+    Invariants enforced by the database, not by check-then-insert:
+      * `provider_order_id` is unique      — one provider order <-> one attempt.
+      * `idempotency_key` is unique        — the create-order retry key is stable.
+      * one open (CREATED/ACTIVE) attempt per bill.
+      * `provider_payment_id` unique when set — a provider payment settles once.
+      * `payment` is one-to-one            — an attempt settles a bill at most once
+        (and Payment.idempotency_key / reference add the same guard on that side).
+
+    Status:
+      CREATED      row written, provider order not confirmed yet (retry-safe)
+      ACTIVE       provider order exists; resident can pay until expires_at
+      SUCCEEDED    verified capture applied -> Payment + Receipt
+      FAILED       the provider refused to create the order
+      EXPIRED      not paid before expiry (or superseded); cannot settle
+      UNAPPLIED    money captured but not applicable (bill already settled,
+                   cancelled, changed, or amount/currency mismatch) -> refund
+      REFUND_PENDING / REFUNDED   provider refund of an UNAPPLIED capture
+    """
+
+    class Status(models.TextChoices):
+        CREATED = "CREATED", "Created"
+        ACTIVE = "ACTIVE", "Awaiting payment"
+        SUCCEEDED = "SUCCEEDED", "Paid"
+        FAILED = "FAILED", "Failed"
+        EXPIRED = "EXPIRED", "Expired"
+        UNAPPLIED = "UNAPPLIED", "Needs refund"
+        REFUND_PENDING = "REFUND_PENDING", "Refund pending"
+        REFUNDED = "REFUNDED", "Refunded"
+
+    OPEN_STATUSES = ("CREATED", "ACTIVE")
+
+    tenant = models.ForeignKey(Tenant, on_delete=models.PROTECT, related_name="+")
+    bill = models.ForeignKey(Bill, on_delete=models.PROTECT, related_name="online_payment_attempts")
+    resident = models.ForeignKey(Resident, on_delete=models.PROTECT, related_name="online_payment_attempts")
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="+"
+    )
+    provider = models.CharField(max_length=20)
+    provider_order_id = models.CharField(max_length=45, unique=True)
+    provider_order_ref = models.CharField(max_length=64, blank=True)
+    idempotency_key = models.UUIDField(unique=True, default=uuid.uuid4, editable=False)
+    payment_session_id = models.TextField(blank=True)
+    amount_cents = models.PositiveBigIntegerField()
+    currency = models.CharField(max_length=3)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.CREATED)
+    expires_at = models.DateTimeField()
+    provider_payment_id = models.CharField(max_length=64, blank=True)
+    last_payment_status = models.CharField(max_length=20, blank=True)
+    failure_message = models.CharField(max_length=255, blank=True)
+    unapplied_reason = models.CharField(max_length=40, blank=True)
+    payment = models.OneToOneField(
+        Payment, on_delete=models.PROTECT, null=True, blank=True, related_name="online_attempt"
+    )
+    finalized_at = models.DateTimeField(null=True, blank=True)
+    last_checked_at = models.DateTimeField(null=True, blank=True)
+    refund_id = models.CharField(max_length=40, blank=True)
+    refund_status = models.CharField(max_length=20, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+
+    objects = TenantScopedManager()
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(check=Q(amount_cents__gt=0), name="online_attempt_amount_positive"),
+            models.UniqueConstraint(
+                fields=["bill"],
+                condition=Q(status__in=["CREATED", "ACTIVE"]),
+                name="one_open_online_attempt_per_bill",
+            ),
+            models.UniqueConstraint(
+                fields=["provider", "provider_payment_id"],
+                condition=~Q(provider_payment_id=""),
+                name="unique_online_provider_payment",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status"]),
+            models.Index(fields=["status", "expires_at"]),
+        ]
+
+
+class PropertyPaymentWebhookEvent(models.Model):
+    """
+    A signature-verified property-payment webhook delivery (P9). Not tenant-owned:
+    the provider calls with no tenant context; the attempt it names carries the
+    tenant. `dedupe_key` (a digest of the verified raw body) is unique, so an
+    at-least-once redelivery collides instead of being processed twice.
+
+    `payload` is kept for support/audit and is never exposed to residents or
+    workspace users.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    provider = models.CharField(max_length=20)
+    dedupe_key = models.CharField(max_length=64)
+    event_type = models.CharField(max_length=64)
+    provider_order_id = models.CharField(max_length=64, blank=True, db_index=True)
+    provider_payment_id = models.CharField(max_length=64, blank=True)
+    payload = models.JSONField()
+    received_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    outcome = models.CharField(max_length=40, blank=True)
+    processing_error = models.CharField(max_length=120, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["provider", "dedupe_key"], name="unique_property_webhook_delivery")
+        ]

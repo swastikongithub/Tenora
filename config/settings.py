@@ -236,6 +236,32 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 # for local dev and the automated suite).
 PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "razorpay")
 
+# --- P9: online resident payments for PROPERTY bills (resident -> owner) ------
+# A separate gateway, separate credentials and a separate webhook route from the
+# Tenora subscription settings above; the two financial domains never share
+# them. Empty-string credential defaults fail closed (order creation refuses,
+# every webhook signature check fails) instead of crashing at import.
+PROPERTY_PAYMENT_GATEWAY = os.environ.get("PROPERTY_PAYMENT_GATEWAY", "cashfree")  # cashfree | mock
+# Kill switch. Off by default: residents see no "Pay online" until an operator
+# has configured credentials and turned it on.
+PROPERTY_ONLINE_PAYMENTS_ENABLED = os.environ.get("PROPERTY_ONLINE_PAYMENTS_ENABLED", "false").lower() == "true"
+CASHFREE_CLIENT_ID = os.environ.get("CASHFREE_CLIENT_ID", "")
+# Also the webhook signing key: Cashfree signs payment webhooks with the PG
+# client secret.
+CASHFREE_CLIENT_SECRET = os.environ.get("CASHFREE_CLIENT_SECRET", "")
+CASHFREE_ENVIRONMENT = os.environ.get("CASHFREE_ENVIRONMENT", "sandbox")  # sandbox | production
+CASHFREE_API_VERSION = os.environ.get("CASHFREE_API_VERSION", "2025-01-01")
+# Replay window for x-webhook-timestamp. Replays inside it are already harmless
+# (event dedupe + idempotent settlement); this bounds how old a signed payload
+# may be. 0 disables the check.
+CASHFREE_WEBHOOK_TOLERANCE_SECONDS = int(os.environ.get("CASHFREE_WEBHOOK_TOLERANCE_SECONDS", "3600"))
+# Public HTTPS base URL of this API, used for the order's notify_url
+# (<base>/api/webhooks/cashfree/property-payments/). Blank = rely on the webhook
+# URL configured in the Cashfree dashboard.
+BACKEND_PUBLIC_URL = os.environ.get("BACKEND_PUBLIC_URL", "")
+# How long a checkout stays payable, locally and at Cashfree (order_expiry_time).
+PROPERTY_ONLINE_PAYMENT_TTL_MINUTES = int(os.environ.get("PROPERTY_ONLINE_PAYMENT_TTL_MINUTES", "30"))
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "apps.tenants.authentication.TenantJWTAuthentication",

@@ -63,3 +63,37 @@ def send_billing_reminders_task():
                 metadata=body,
             )
         return {"lock_skipped": False, **body}
+
+
+RECONCILE_LOCK_NAME = "properties.reconcile_online_payments"
+
+
+@shared_task(name="properties.reconcile_online_payments", **RETRY_POLICY)
+def reconcile_online_payments_task():
+    """P9: settle or expire open online checkouts whose webhook never arrived or
+    that passed their expiry. Asks the provider (read-only) and applies results
+    through the same idempotent settlement path as the webhook, so an overlap
+    with a webhook or a manual run can never settle a bill twice."""
+    from apps.properties.online_payments import OnlinePaymentService
+
+    with advisory_lock(RECONCILE_LOCK_NAME) as acquired:
+        if not acquired:
+            return {"lock_skipped": True, "checked": 0, "settled": 0, "expired": 0}
+        counts = OnlinePaymentService.reconcile_open()
+        logger.info(
+            "online payment reconciliation: %d checked, %d settled, %d expired",
+            counts["checked"], counts["settled"], counts["expired"],
+        )
+        if counts["settled"] or counts["expired"]:
+            AuditService.record_observational(
+                actor=None,
+                action="scheduled.online_payment_reconciliation",
+                target_type="ScheduledTask",
+                target_id="scheduled.online_payment_reconciliation",
+                summary=(
+                    f"Online payment reconciliation: {counts['checked']} checked, "
+                    f"{counts['settled']} settled, {counts['expired']} expired"
+                ),
+                metadata=counts,
+            )
+        return {"lock_skipped": False, **counts}

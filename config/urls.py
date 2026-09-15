@@ -60,6 +60,7 @@ from apps.platform.property_views import (
     PlatformPropertyWorkspaceListView,
     PlatformReadingProofView,
 )
+from apps.properties import online_payment_views as opv
 from apps.properties import views as pv
 from apps.tenants.views import (
     AccountUsageView,
@@ -370,6 +371,11 @@ urlpatterns = [
     path("api/bills/", pv.BillListView.as_view(), name="bill_list"),
     path("api/bills/<uuid:pk>/", pv.BillDetailView.as_view(), name="bill_detail"),
     path("api/bills/<uuid:pk>/pdf/", pv.BillPdfView.as_view(), name="bill_pdf"),
+    # P9 online resident payments (tenant-scoped; body never trusted).
+    path("api/bills/<uuid:pk>/online-payment/", opv.BillOnlinePaymentView.as_view(), name="bill_online_payment"),
+    path("api/online-payments/", opv.OnlinePaymentListView.as_view(), name="online_payment_list"),
+    path("api/online-payments/<uuid:pk>/", opv.OnlinePaymentDetailView.as_view(), name="online_payment_detail"),
+    path("api/online-payments/<uuid:pk>/refund/", opv.OnlinePaymentRefundView.as_view(), name="online_payment_refund"),
     path(
         "api/bills/<uuid:pk>/line-items/",
         pv.BillLineItemListView.as_view(),
@@ -417,5 +423,13 @@ urlpatterns = [
         "api/webhooks/razorpay/",
         RazorpayWebhookView.as_view(),
         name="razorpay_webhook",
+    ),
+    # P9: property-bill payments (resident -> owner). A separate route, gateway
+    # and verification from the subscription webhook above; same no-auth,
+    # not-in-GLOBAL_PATHS arrangement for the same reason.
+    path(
+        "api/webhooks/cashfree/property-payments/",
+        opv.CashfreePropertyPaymentWebhookView.as_view(),
+        name="cashfree_property_payment_webhook",
     ),
 ]

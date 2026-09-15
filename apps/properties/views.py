@@ -897,7 +897,13 @@ class BillDetailView(WorkspaceAPIView):
             ),
             pk,
         )
-        return Response(BillDetailSerializer(bill, context={"today": self.today}).data)
+        data = BillDetailSerializer(bill, context={"today": self.today}).data
+        # P9: whether THIS viewer may pay THIS bill online now (never trusted
+        # by the start endpoint, which re-checks everything under a lock).
+        from apps.properties.online_payments import eligibility
+
+        data["online_payment"] = eligibility(user=request.user, bill=bill, is_manager=self.is_manager())
+        return Response(data)
 
 
 class BillLineItemListView(WorkspaceAPIView):

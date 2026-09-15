@@ -1514,6 +1514,14 @@ class PaymentService:
             payment = Payment.objects.select_for_update().get(pk=payment.pk)
             if payment.status == Payment.Status.VOIDED:
                 return payment
+            if payment.method == Payment.Method.ONLINE:
+                # Money that really moved through the gateway is reversed by a
+                # provider refund, never hidden by a void (P9).
+                raise DomainError(
+                    "ONLINE_PAYMENT_NOT_VOIDABLE",
+                    "An online payment can’t be voided. It has to be refunded through the payment provider.",
+                    status_code=409,
+                )
             payment.status = Payment.Status.VOIDED
             payment.voided_at = timezone.now()
             payment.void_reason = reason.strip()

@@ -5,7 +5,7 @@
 
 import { useMutation } from '@tanstack/react-query'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 
 import { Alert, Button, Input, Modal } from '../../components'
 import { apiClient } from '../../lib/api-client'
@@ -14,6 +14,7 @@ import { METHOD_LABEL, money, toMinorUnits } from '../../lib/property/format'
 import { useInvalidateProperty, usePropertyQuery, useWorkspaceRole } from '../../lib/property/hooks'
 import type { BillDetail, LineItem } from '../../lib/property/types'
 import { BillDetailView } from './BillDetailView'
+import { OnlinePaymentResult, PayOnlinePanel } from './OnlinePayment'
 import { DownloadPdfButton, QueryState, Select, TextArea } from './ui'
 import { errorMessage, fieldError } from '../../lib/property/errors'
 
@@ -342,6 +343,8 @@ export function BillDetailPage() {
   const { isOwner } = useWorkspaceRole()
   const invalidate = useInvalidateProperty()
   const query = usePropertyQuery<BillDetail>('bill', `/bills/${id}/`)
+  const [searchParams] = useSearchParams()
+  const returningAttempt = searchParams.get('online_payment')
   const [modal, setModal] = useState<null | 'line' | 'payment' | 'correction' | 'cancel' | 'publish-error'>(null)
   const [voidTarget, setVoidTarget] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -417,6 +420,7 @@ export function BillDetailPage() {
           {actionError}
         </Alert>
       )}
+      {returningAttempt && <OnlinePaymentResult attemptId={returningAttempt} />}
       <BillDetailView
         bill={bill}
         mode={isOwner ? 'owner' : 'resident'}
@@ -424,11 +428,13 @@ export function BillDetailPage() {
         actions={ownerActions}
         onRemoveLine={(line) => removeLine.mutate(line)}
       />
+      {!isOwner && <PayOnlinePanel bill={bill} />}
 
-      {isOwner && bill.payments.some((p) => p.status === 'COMPLETED') && (
+      {isOwner && bill.payments.some((p) => p.status === 'COMPLETED' && p.method !== 'ONLINE') && (
         <div className="mt-4 flex flex-wrap gap-2">
           {bill.payments
-            .filter((p) => p.status === 'COMPLETED')
+            // Online payments are reversed by a provider refund, never voided (P9).
+            .filter((p) => p.status === 'COMPLETED' && p.method !== 'ONLINE')
             .map((p) => (
               <Button key={p.id} size="sm" variant="ghost" onClick={() => setVoidTarget(p.id)}>
                 Void {money(p.amount_cents, p.currency)} payment

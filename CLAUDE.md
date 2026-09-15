@@ -95,7 +95,7 @@ These were each deliberated and corrected during design. Do not "fix" them back.
 Spec: `docs/TENORA_PROPERTY_BILLING_MASTER_PLAN.md`. Two financial domains that never
 share a table: `apps.billing` (owner -> Tenora subscription) and `apps.properties`
 (resident -> workspace owner). Nothing in `apps.properties` references Plan,
-Subscription or the payment gateway.
+Subscription, SubscriptionCheckout, WebhookEvent or `apps.billing.gateway`.
 
 - **`Tenant` is the workspace; `Membership.Role.MEMBER` is a resident** (value kept,
   labelled "Resident"). Authorization is by capability
@@ -123,6 +123,15 @@ Subscription or the payment gateway.
 - **Account deletion anonymizes and deactivates** (`apps.users.account`); it never
   hard-deletes the User row and is refused while the user owns a workspace or is the
   last root.
+- **P9 online resident payments (Cashfree)** use their OWN gateway:
+  `apps.properties.gateway.get_property_gateway()` (`cashfree` | `mock`), own
+  settings (`CASHFREE_*`, `PROPERTY_*`), own webhook
+  (`/api/webhooks/cashfree/property-payments/`, raw-body Base64 HMAC-SHA256 of
+  timestamp + body with the client secret). Only a verified capture settles a
+  bill, through `PaymentService.record` (method ONLINE) from
+  `OnlinePaymentService.apply_payment`; the browser never supplies amounts or
+  outcomes. Transient checkout state lives on `OnlinePaymentAttempt`, never on
+  `Payment`. Online payments are refunded, never voided.
 - Frontend `TopNavbar` is role-aware; resident routes/owner routes are gated in
   `routes/RoleRoute.tsx` (UX only — backend is authoritative).
 

@@ -58,4 +58,12 @@ app.conf.beat_schedule = {
         "task": "properties.send_billing_reminders",
         "schedule": crontab(hour=4, minute=0),  # 04:00 UTC
     },
+    # P9 online resident payments: settle checkouts whose webhook never arrived
+    # and expire lapsed ones. Checkouts live ~30 minutes, so every 10 minutes
+    # bounds how long a paid bill can look unpaid when a webhook is lost. Each
+    # run only queries attempts not checked in the last 5 minutes.
+    "online-payment-reconciliation": {
+        "task": "properties.reconcile_online_payments",
+        "schedule": crontab(minute="*/10"),
+    },
 }

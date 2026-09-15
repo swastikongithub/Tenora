@@ -275,6 +275,44 @@ export interface BillDetail extends Bill {
   payments: Payment[]
   receipts: Receipt[]
   corrections: BillCorrection[]
+  /** P9: whether the viewer can pay this bill online now (server-decided). */
+  online_payment?: OnlinePaymentEligibility
+}
+
+export type OnlinePaymentDisplayState = 'processing' | 'succeeded' | 'failed' | 'expired' | 'already_paid' | 'needs_review'
+
+/** An online checkout of one bill — never a raw provider object. */
+export interface OnlinePaymentAttempt {
+  id: string
+  bill_id: string
+  status: 'CREATED' | 'ACTIVE' | 'SUCCEEDED' | 'FAILED' | 'EXPIRED' | 'UNAPPLIED' | 'REFUND_PENDING' | 'REFUNDED'
+  display_state: OnlinePaymentDisplayState
+  amount_cents: number
+  currency: string
+  order_id: string
+  expires_at: string
+  failure_message: string
+  unapplied_reason: string
+  refund_status: string
+  receipt_id: string | null
+  created_at: string
+  finalized_at: string | null
+  /** Only on the start response. */
+  payment_session_id?: string
+  checkout_mode?: 'sandbox' | 'production'
+  /** Owner listing only. */
+  bill_number?: string
+  resident_name?: string
+  unit_identifier?: string
+  period_start?: string
+}
+
+export interface OnlinePaymentEligibility {
+  available: boolean
+  reason: null | 'DISABLED' | 'NOT_RESIDENT' | 'NOTHING_DUE' | 'CURRENCY_NOT_SUPPORTED' | 'PHONE_REQUIRED'
+  amount_cents: number
+  currency: string
+  open_attempt: OnlinePaymentAttempt | null
 }
 
 export interface PeriodSummary {

@@ -33,6 +33,7 @@ class Notification(models.Model):
         PAYMENT_RECORDED = "PAYMENT_RECORDED", "Payment recorded"
         PAYMENT_VOIDED = "PAYMENT_VOIDED", "Payment voided"
         RECEIPT_ISSUED = "RECEIPT_ISSUED", "Receipt issued"
+        ONLINE_PAYMENT_UNAPPLIED = "ONLINE_PAYMENT_UNAPPLIED", "Online payment needs refund"
         OVERDUE_SUMMARY = "OVERDUE_SUMMARY", "Overdue summary"
         CYCLE_INCOMPLETE = "CYCLE_INCOMPLETE", "Billing cycle incomplete"
         PLAN_LIMIT = "PLAN_LIMIT", "Plan limit"
