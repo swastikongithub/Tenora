@@ -10,9 +10,10 @@ plan does not have (see §5).
 
 ---
 
-## 1. The three scheduled operations
+## 1. The four scheduled operations
 
-All three are defined in `apps/billing/tasks.py` and scheduled by the beat
+The three subscription sweeps are defined in `apps/billing/tasks.py`; the
+property billing reminder task is in `apps/properties/tasks.py`. All four are scheduled by the beat
 configuration in `config/celery.py`. Each is a thin caller of the same
 service-layer method the matching `manage.py` command invokes — the
 orchestration lives once, in the service.
@@ -22,6 +23,7 @@ orchestration lives once, in the service.
 | `billing.process_webhook_events` | `WebhookProcessingService.process_pending()` | every 5 minutes | Applies the effect of every webhook event still marked unprocessed — events the inline handler could not apply, and events deferred because they arrived before the subscription they refer to. |
 | `billing.reconcile_subscriptions` | `ReconciliationService.reconcile_all()` | hourly, on the hour | Read-only cross-check of local subscription status against the payment gateway. Records drift as discrepancy rows; corrects nothing. |
 | `billing.meter_usage` | `UsageMeteringService.snapshot_all_subscribed()` | daily, 03:00 UTC | Snapshots each subscribed tenant's metered quantity for the current billing period. |
+| `properties.send_billing_reminders` | `apps.properties.reminders.send_billing_reminders()` | daily, 04:00 UTC | Sends in-app property billing reminders: bills due soon, overdue bills per aging bucket, an overdue summary for owners, and an incomplete-cycle nudge. Changes no billing state. |
 
 The cadences are chosen from what each job is actually protecting against, not
 from a uniform default. The webhook sweep is frequent because a deferred event
@@ -30,7 +32,8 @@ hourly because a subscription the provider changed an hour ago is a real
 problem but not a five-minute one, and each run costs one provider read per
 provider-linked subscription. Usage is daily because billing periods are
 roughly thirty days and one snapshot per period is the intent — daily is
-margin, and an extra run is a no-op.
+margin, and an extra run is a no-op. Reminders are daily because overdue is
+derived from the server date, so nothing about a reminder changes within a day.
 
 ---
 
@@ -55,6 +58,11 @@ a convention.
   second run that still sees the same drift writes a second discrepancy row
   with a later detection time — by design, since the sequence of rows is the
   record of how long the drift has persisted.
+- **Billing reminders.** Every notification carries a `dedupe_key` (bill,
+  reminder kind, bucket or date) under a partial `UNIQUE(recipient, dedupe_key)`
+  constraint, inserted in a savepoint, so a second run the same day notifies
+  nobody. The task only reads bills; it never publishes, charges or changes a
+  status.
 
 Partial completion is safe for the same reason: each sweep commits per row and
 captures per-row failures on its result rather than aborting, so a run that
@@ -127,7 +135,7 @@ is no worker and no beat process, therefore **no scheduled task currently
 executes in production.** This is a deployment gap, not a code gap, and it is
 stated here rather than implied by silence.
 
-Until a worker and scheduler are deployed, the three sweeps run through the
+Until a worker and scheduler are deployed, the three subscription sweeps run through the
 **Fallback Sweep Controls** in the operator console (`/admin/webhooks`,
 `/admin/reconciliation`), which call the same service methods the scheduled
 tasks call. Those controls are throttled and audited. They are kept — not
@@ -153,7 +161,11 @@ on-demand run, a recovery, or debugging:
 python manage.py process_webhook_events
 python manage.py reconcile_subscriptions
 python manage.py meter_usage
+python manage.py send_billing_reminders
 ```
+
+Workspace owners can also run their own workspace's reminders from the Billing
+page (`POST /api/billing/reminders/run/`).
 
 These share the service methods with the tasks, so a manual run and a scheduled
 run do the same thing — and, because of §3, cannot collide with one.

@@ -37,6 +37,7 @@ import {
   TariffsPage,
 } from './property/BillingPages'
 import { PaymentsPage, ReceiptPage, ReceiptsPage } from './property/PaymentPages'
+import { PortfolioPage } from './property/PortfolioPage'
 import {
   OnboardingPage,
   PropertiesPage,
@@ -90,6 +91,7 @@ export function AppRoutes() {
             <Route path="readings" element={<ReadingsPage />} />
             <Route path="tariffs" element={<TariffsPage />} />
             <Route path="reports" element={<ReportsPage />} />
+            <Route path="portfolio" element={<PortfolioPage />} />
           </Route>
         </Route>
 

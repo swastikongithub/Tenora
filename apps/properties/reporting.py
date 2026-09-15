@@ -20,6 +20,7 @@ from django.db.models import Sum
 
 from apps.properties import aging
 from apps.properties.models import Bill, BillLineItem, Lease, Payment
+from apps.properties.services import WorkspaceSettingsService
 
 ISSUED = ("PUBLISHED", "PARTIALLY_PAID", "PAID")
 
@@ -161,3 +162,66 @@ def occupancy(units_qs, tenant_lease_qs):
     total = units_qs.exclude(status="INACTIVE").count()
     occupied = tenant_lease_qs.filter(status=Lease.Status.ACTIVE).values("unit_id").distinct().count()
     return {"units": total, "occupied_units": occupied}
+
+
+def owner_portfolio(workspaces, period_start, today):
+    """
+    Billing totals across the workspaces one owner controls (plan §16.2). The
+    caller decides which workspaces those are; each is still read through
+    `for_tenant`, so a workspace's numbers can only ever come from its own rows.
+
+    Amounts are never added across currencies: `totals` has one entry per
+    currency, and each workspace row carries its own.
+    """
+    rows = []
+    totals = {}
+    for tenant in workspaces:
+        bills = Bill.objects.for_tenant(tenant)
+        summary = period_summary(bills, period_start, today)
+        report = aging_summary(bills, today)
+        currency = WorkspaceSettingsService.get(tenant).currency
+        rows.append(
+            {
+                "id": str(tenant.id),
+                "name": tenant.name,
+                "slug": tenant.slug,
+                "is_active": tenant.is_active,
+                "currency": currency,
+                **{k: summary[k] for k in (
+                    "billed_cents", "collected_cents", "outstanding_cents", "overdue_cents",
+                    "bills_issued", "bills_draft", "bills_paid", "bills_unpaid",
+                )},
+                "total_outstanding_cents": report["total_outstanding_cents"],
+                "total_overdue_cents": report["total_overdue_cents"],
+                "buckets": report["buckets"],
+            }
+        )
+        total = totals.setdefault(
+            currency,
+            {
+                "currency": currency,
+                "workspaces": 0,
+                "billed_cents": 0,
+                "collected_cents": 0,
+                "outstanding_cents": 0,
+                "overdue_cents": 0,
+                "total_outstanding_cents": 0,
+                "total_overdue_cents": 0,
+                "buckets": {b["key"]: {**b, "amount_cents": 0, "count": 0} for b in report["buckets"]},
+            },
+        )
+        total["workspaces"] += 1
+        for key in ("billed_cents", "collected_cents", "outstanding_cents", "overdue_cents"):
+            total[key] += summary[key]
+        for key in ("total_outstanding_cents", "total_overdue_cents"):
+            total[key] += report[key]
+        for bucket in report["buckets"]:
+            total["buckets"][bucket["key"]]["amount_cents"] += bucket["amount_cents"]
+            total["buckets"][bucket["key"]]["count"] += bucket["count"]
+    for total in totals.values():
+        total["buckets"] = list(total["buckets"].values())
+    return {
+        "period": period_start.strftime("%Y-%m"),
+        "workspaces": rows,
+        "totals": sorted(totals.values(), key=lambda t: t["currency"]),
+    }

@@ -73,6 +73,7 @@ export const GLOBAL_PATHS: ReadonlySet<string> = new Set([
   '/api/account/password/',
   '/api/account/delete/',
   '/api/account/usage/',
+  '/api/account/billing-portfolio/',
   '/api/platform/memberships/detail/',
   '/api/platform/property-billing/summary/',
   '/api/platform/property-billing/workspaces/',

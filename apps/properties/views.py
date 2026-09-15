@@ -17,18 +17,23 @@ resident's bill, is therefore a 404 — never a 403 that would confirm it exists
 """
 
 from django.db.models import Count, Prefetch, Q
-from django.http import FileResponse, Http404
+import json
+import re
+
+from django.http import FileResponse, Http404, HttpResponse
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.renderers import BaseRenderer, JSONRenderer
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.properties import aging, reporting
+from apps.properties import aging, documents, reporting
 from apps.properties.filters import filter_bills, filter_payments, filter_receipts
 from apps.properties.models import (
     Bill,
+    BillCorrection,
     BillingCycle,
     BillLineItem,
     Lease,
@@ -93,7 +98,7 @@ from apps.properties.services import (
     UnitService,
     WorkspaceSettingsService,
 )
-from apps.tenants.models import Invitation
+from apps.tenants.models import Invitation, Membership
 from apps.tenants.permissions import IsTenantMember, RequiresCapability, has_capability
 
 
@@ -185,6 +190,38 @@ def visible_receipts(request):
 BILL_LIST_PREFETCH = Prefetch("line_items", queryset=BillLineItem.objects.only(
     "id", "bill_id", "type", "amount_cents", "quantity", "sort_order", "created_at"
 ))
+
+
+# --- owner portfolio (global) -----------------------------------------------------
+
+
+class BillingPortfolioView(APIView):
+    """
+    GET /api/account/billing-portfolio/?period=YYYY-MM — billing totals across
+    every workspace the authenticated user may report on (plan §16.2). A GLOBAL
+    path: no X-Tenant-ID, because it spans workspaces by definition. The set of
+    workspaces comes only from the user's own ACTIVE memberships holding
+    `reports.view` (never from the request); closed workspaces are left out. A
+    user who controls no workspace — a resident — is refused.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        memberships = (
+            Membership.objects.select_related("tenant")
+            .filter(user=request.user, status=Membership.Status.ACTIVE, tenant__closed_at__isnull=True)
+            .order_by("tenant__created_at")
+        )
+        workspaces = [m.tenant for m in memberships if has_capability(m, "reports.view")]
+        if not workspaces:
+            return Response(
+                {"detail": "Only workspace owners have a billing portfolio.", "code": "not_a_workspace_owner"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        today = aging.server_today()
+        start, _ = reporting.period_from_param(request.query_params.get("period"), today)
+        return Response(reporting.owner_portfolio(workspaces, start, today))
 
 
 # --- workspace settings / overview ------------------------------------------
@@ -1000,16 +1037,74 @@ class ReceiptListView(WorkspaceAPIView):
 class ReceiptDetailView(WorkspaceAPIView):
     def get(self, request, pk):
         receipt = self.get_scoped(visible_receipts(request).select_related("payment", "bill"), pk)
-        settings_row = WorkspaceSettingsService.get(request.tenant)
-        return Response(
-            {
-                **ReceiptSerializer(receipt).data,
-                "issuer": {
-                    "name": settings_row.display_name or request.tenant.name,
-                    "contact_email": settings_row.contact_email,
-                    "contact_phone": settings_row.contact_phone,
-                    "address": settings_row.address,
-                    "footer": settings_row.receipt_footer,
-                },
-            }
+        return Response({**ReceiptSerializer(receipt).data, "issuer": issuer_for(request.tenant)})
+
+
+# --- PDF documents ----------------------------------------------------------------
+
+
+def issuer_for(tenant):
+    settings_row = WorkspaceSettingsService.get(tenant)
+    return {
+        "name": settings_row.display_name or tenant.name,
+        "contact_email": settings_row.contact_email,
+        "contact_phone": settings_row.contact_phone,
+        "address": settings_row.address,
+        "footer": settings_row.receipt_footer,
+    }
+
+
+class PDFRenderer(BaseRenderer):
+    """Lets a client that sends `Accept: application/pdf` reach the view. The
+    view returns the PDF as a plain HttpResponse; this renderer only ever
+    renders an error body, which it writes as JSON."""
+
+    media_type = "application/pdf"
+    format = "pdf"
+    charset = None
+
+    def render(self, data, accepted_media_type=None, renderer_context=None):
+        if isinstance(data, bytes):
+            return data
+        return json.dumps(data, default=str).encode()
+
+
+def pdf_response(content, filename):
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", filename) or "document"
+    response = HttpResponse(content, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{safe}.pdf"'
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    return response
+
+
+class BillPdfView(WorkspaceAPIView):
+    """GET /api/bills/<id>/pdf/ — the issued bill as a PDF. Same visibility as
+    the bill detail (an owner: any bill in the workspace; a resident: only their
+    own published bills, anything else 404). A draft is not a bill anyone has
+    been issued, so it has no document."""
+
+    renderer_classes = [JSONRenderer, PDFRenderer]
+
+    def get(self, request, pk):
+        bill = self.get_scoped(
+            visible_bills(request).prefetch_related(
+                "line_items",
+                Prefetch("payments", queryset=Payment.objects.select_related("receipt").order_by("payment_date", "created_at")),
+                Prefetch("corrections", queryset=BillCorrection.objects.order_by("created_at")),
+            ),
+            pk,
         )
+        if bill.published_at is None:
+            raise DomainError("BILL_NOT_ISSUED", "A draft bill has no PDF. Publish it first.", status_code=409)
+        return pdf_response(documents.render_bill_pdf(bill, issuer_for(request.tenant)), bill.bill_number)
+
+
+class ReceiptPdfView(WorkspaceAPIView):
+    """GET /api/receipts/<id>/pdf/ — same visibility as the receipt detail."""
+
+    renderer_classes = [JSONRenderer, PDFRenderer]
+
+    def get(self, request, pk):
+        receipt = self.get_scoped(visible_receipts(request).select_related("payment", "bill"), pk)
+        return pdf_response(documents.render_receipt_pdf(receipt, issuer_for(request.tenant)), receipt.receipt_number)

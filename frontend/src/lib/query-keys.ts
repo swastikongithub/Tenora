@@ -115,6 +115,8 @@ export const queryKeys = {
   myInvitations: () => ['global', 'invitations', 'mine'] as const,
   accountProfile: () => ['global', 'account', 'profile'] as const,
   accountUsage: () => ['global', 'account', 'usage'] as const,
+  /** Billing totals across the caller's own workspaces, per month. */
+  billingPortfolio: (period: string) => ['global', 'account', 'billing-portfolio', period] as const,
 
   /** Platform-admin property billing — cross-workspace, 'global' like its siblings. */
   platformPropertyBilling: (

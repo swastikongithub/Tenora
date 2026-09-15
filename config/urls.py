@@ -232,6 +232,7 @@ urlpatterns = [
     path("api/account/password/", AccountPasswordView.as_view(), name="account_password"),
     path("api/account/delete/", AccountDeleteView.as_view(), name="account_delete"),
     path("api/account/usage/", AccountUsageView.as_view(), name="account_usage"),
+    path("api/account/billing-portfolio/", pv.BillingPortfolioView.as_view(), name="account_billing_portfolio"),
     # --- Platform admin: property billing visibility + workspace roles ---
     path(
         "api/platform/memberships/detail/",
@@ -368,6 +369,7 @@ urlpatterns = [
     ),
     path("api/bills/", pv.BillListView.as_view(), name="bill_list"),
     path("api/bills/<uuid:pk>/", pv.BillDetailView.as_view(), name="bill_detail"),
+    path("api/bills/<uuid:pk>/pdf/", pv.BillPdfView.as_view(), name="bill_pdf"),
     path(
         "api/bills/<uuid:pk>/line-items/",
         pv.BillLineItemListView.as_view(),
@@ -390,6 +392,7 @@ urlpatterns = [
     path("api/payments/<uuid:pk>/void/", pv.PaymentVoidView.as_view(), name="payment_void"),
     path("api/receipts/", pv.ReceiptListView.as_view(), name="receipt_list"),
     path("api/receipts/<uuid:pk>/", pv.ReceiptDetailView.as_view(), name="receipt_detail"),
+    path("api/receipts/<uuid:pk>/pdf/", pv.ReceiptPdfView.as_view(), name="receipt_pdf"),
     path(
         "api/subscriptions/current/",
         CurrentSubscriptionView.as_view(),

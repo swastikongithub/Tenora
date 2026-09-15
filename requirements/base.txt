@@ -33,3 +33,6 @@ razorpay>=2.0,<3.0
 celery>=5.4,<6.0
 # The Python client Celery's Redis broker transport needs (redis:// URLs).
 redis>=5.0,<6.0
+# PDF bills and receipts (property billing plan §26). Pure Python; renders only
+# stored bill/receipt data — see apps/properties/documents.py.
+reportlab>=4.2,<5.0

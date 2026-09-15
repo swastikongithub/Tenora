@@ -314,6 +314,47 @@ export interface AgingReport {
   rows: AgingRow[]
 }
 
+export type AgingBucketTotal = { key: AgingBucket; label: string; amount_cents: number; count: number }
+
+/** GET /api/account/billing-portfolio/ — one row per workspace the owner controls. */
+export interface PortfolioWorkspace {
+  id: string
+  name: string
+  slug: string
+  is_active: boolean
+  currency: string
+  billed_cents: number
+  collected_cents: number
+  outstanding_cents: number
+  overdue_cents: number
+  bills_issued: number
+  bills_draft: number
+  bills_paid: number
+  bills_unpaid: number
+  total_outstanding_cents: number
+  total_overdue_cents: number
+  buckets: AgingBucketTotal[]
+}
+
+/** Totals are per currency — amounts in different currencies are never added. */
+export interface PortfolioTotal {
+  currency: string
+  workspaces: number
+  billed_cents: number
+  collected_cents: number
+  outstanding_cents: number
+  overdue_cents: number
+  total_outstanding_cents: number
+  total_overdue_cents: number
+  buckets: AgingBucketTotal[]
+}
+
+export interface BillingPortfolio {
+  period: string
+  workspaces: PortfolioWorkspace[]
+  totals: PortfolioTotal[]
+}
+
 export interface OnboardingStep {
   key: string
   label: string

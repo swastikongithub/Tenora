@@ -57,6 +57,7 @@ class TaskRegistrationTests(SimpleTestCase):
         "billing.process_webhook_events",
         "billing.meter_usage",
         "billing.reconcile_subscriptions",
+        "properties.send_billing_reminders",
     }
 
     def test_every_task_is_registered_with_the_celery_app(self):
@@ -86,6 +87,9 @@ class TaskRegistrationTests(SimpleTestCase):
         )
         self.assertEqual(
             by_task["billing.meter_usage"], crontab(hour=3, minute=0)
+        )
+        self.assertEqual(
+            by_task["properties.send_billing_reminders"], crontab(hour=4, minute=0)
         )
 
     def test_every_task_retries_a_bounded_number_of_times(self):

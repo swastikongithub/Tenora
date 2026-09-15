@@ -50,4 +50,12 @@ app.conf.beat_schedule = {
         "task": "billing.reconcile_subscriptions",
         "schedule": crontab(minute=0),  # top of every hour
     },
+    # Property billing reminders (due soon / overdue / owner summary / cycle
+    # incomplete). Reminders are day-granular — overdue is derived from the
+    # server date — so once a day is the natural cadence; notification dedupe
+    # keys make a repeat run notify nobody twice. Changes no billing state.
+    "property-billing-reminders": {
+        "task": "properties.send_billing_reminders",
+        "schedule": crontab(hour=4, minute=0),  # 04:00 UTC
+    },
 }

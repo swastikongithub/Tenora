@@ -86,6 +86,8 @@ GLOBAL_PATHS = frozenset({
     "/api/account/password/",
     "/api/account/delete/",
     "/api/account/usage/",
+    # Owner billing portfolio: spans the caller's own workspaces by definition.
+    "/api/account/billing-portfolio/",
     # Platform-admin property billing visibility + workspace role control.
     # Cross-tenant by design, gated by IsPlatformStaff / IsPlatformRoot on the
     # views, exactly like every /api/platform/ entry above.

@@ -10,6 +10,7 @@ import {
 describe('GLOBAL_PATHS — frontend mirror of the backend set', () => {
   it('is byte-identical to apps/tenants/authentication.py GLOBAL_PATHS', () => {
     expect([...GLOBAL_PATHS].sort()).toEqual([
+      '/api/account/billing-portfolio/',
       '/api/account/delete/',
       '/api/account/password/',
       '/api/account/profile/',

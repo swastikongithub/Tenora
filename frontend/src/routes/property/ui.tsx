@@ -5,11 +5,12 @@
  * bucket, a plan quota), not a generic UI element.
  */
 
-import { useId, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { useId, useState, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { NavLink } from 'react-router-dom'
 
 import { Alert, Badge, Button, Skeleton } from '../../components'
 import type { BadgeVariant } from '../../components'
+import { downloadFile } from '../../lib/property/download'
 import { errorMessage } from '../../lib/property/errors'
 import { cn } from '../../lib/cn'
 import { STATUS_LABEL } from '../../lib/property/format'
@@ -222,6 +223,35 @@ export function QueryState({
       </Alert>
     )
   return null
+}
+
+/** "Download PDF" for an issued bill or a receipt; errors show inline. */
+export function DownloadPdfButton({ path, filename, label = 'Download PDF' }: { path: string; filename: string; label?: string }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const onClick = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await downloadFile(path, filename)
+    } catch (cause) {
+      setError(errorMessage(cause, 'Couldn’t download the PDF.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <span className="inline-flex flex-col items-end gap-1 print:hidden">
+      <Button size="sm" variant="secondary" onClick={onClick} loading={busy}>
+        {label}
+      </Button>
+      {error && (
+        <span role="alert" className="text-caption text-danger">
+          {error}
+        </span>
+      )}
+    </span>
+  )
 }
 
 export function Section({ title, children, actions }: { title: string; children: ReactNode; actions?: ReactNode }) {

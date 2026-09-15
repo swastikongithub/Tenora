@@ -11,7 +11,7 @@ import { ApiError } from '../../lib/api-error'
 import { METHOD_LABEL, formatDay, formatPeriod, money } from '../../lib/property/format'
 import { usePropertyQuery, useWorkspaceRole } from '../../lib/property/hooks'
 import type { Paginated, Payment, Receipt } from '../../lib/property/types'
-import { PageHeader, QueryState, Section, SubNav } from './ui'
+import { DownloadPdfButton, PageHeader, QueryState, Section, SubNav } from './ui'
 
 export function PaymentsPage() {
   const { isOwner, tenantName } = useWorkspaceRole()
@@ -95,7 +95,10 @@ export function ReceiptPage() {
     <div className="max-w-[640px]">
       <p className="mb-4 flex justify-between text-label print:hidden">
         <Link to="/receipts" className="text-secondary hover:text-primary">← Receipts</Link>
-        <Button size="sm" variant="secondary" onClick={() => window.print()}>Print</Button>
+        <span className="flex items-start gap-2">
+          <DownloadPdfButton path={`/receipts/${r.id}/pdf/`} filename={`${r.receipt_number}.pdf`} />
+          <Button size="sm" variant="secondary" onClick={() => window.print()}>Print</Button>
+        </span>
       </p>
       <article className="rounded-lg border border-subtle bg-raised p-6" aria-label={`Receipt ${r.receipt_number}`}>
         <header className="flex flex-wrap justify-between gap-4">

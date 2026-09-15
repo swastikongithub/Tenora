@@ -63,6 +63,7 @@ export function BillingLayout() {
           { to: '/billing/readings', label: 'Meter readings' },
           { to: '/billing/tariffs', label: 'Tariffs' },
           { to: '/billing/reports', label: 'Reports' },
+          { to: '/billing/portfolio', label: 'All workspaces' },
         ]}
       />
       <Outlet />

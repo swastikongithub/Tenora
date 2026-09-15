@@ -14,7 +14,7 @@ import { METHOD_LABEL, money, toMinorUnits } from '../../lib/property/format'
 import { useInvalidateProperty, usePropertyQuery, useWorkspaceRole } from '../../lib/property/hooks'
 import type { BillDetail, LineItem } from '../../lib/property/types'
 import { BillDetailView } from './BillDetailView'
-import { QueryState, Select, TextArea } from './ui'
+import { DownloadPdfButton, QueryState, Select, TextArea } from './ui'
 import { errorMessage, fieldError } from '../../lib/property/errors'
 
 function newKey() {
@@ -404,11 +404,14 @@ export function BillDetailPage() {
 
   return (
     <div className="max-w-[960px]">
-      <p className="mb-4 text-label">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-2 text-label">
         <Link to={isOwner ? '/billing/bills' : '/billing-history'} className="text-secondary hover:text-primary">
           ← Bills
         </Link>
-      </p>
+        {bill.published_at && bill.bill_number && (
+          <DownloadPdfButton path={`/bills/${bill.id}/pdf/`} filename={`${bill.bill_number}.pdf`} />
+        )}
+      </div>
       {actionError && (
         <Alert variant="danger" className="mb-4">
           {actionError}
