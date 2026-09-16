@@ -16,7 +16,9 @@ from types import SimpleNamespace
 from unittest import mock
 
 import requests
+from datetime import datetime
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.billing.gateway import EventType, ProviderUnavailable, WebhookParseError
 from apps.billing.gateway.base import ProviderSubscriptionStatus, SubscriberContactRequired
@@ -267,6 +269,67 @@ class CreateSubscriptionTests(TestCase):
         self.assertEqual(created.session_token, "sess_abc")
         self.assertEqual(created.public_key, "")  # never a key or secret
         self.assertEqual(created.mode, "sandbox")
+
+    def test_the_mandate_expiry_is_a_horizon_not_the_checkout_session_ttl(self):
+        # Cashfree rejected "Invalid subscription expiresOn" when the mandate
+        # was given the 60-minute session TTL: subscription_expiry_time ends the
+        # MANDATE, while session_id_expiry closes the checkout link.
+        gw, session = adapter([
+            FakeResponse(200, {"subscription_id": "s", "subscription_session_id": "sess"})
+        ])
+        before = timezone.now()
+        gw.create_subscription(self.tenant, plan())
+        body = json.loads(session.request.call_args.kwargs["data"])
+
+        mandate = datetime.fromisoformat(body["subscription_expiry_time"])
+        session_expiry = datetime.fromisoformat(body["subscription_meta"]["session_id_expiry"])
+        self.assertGreater((mandate - before).days, 365 * 9)
+        self.assertLess((session_expiry - before).total_seconds(), 2 * 60 * 60)
+        self.assertGreater(mandate, session_expiry)
+
+    def test_the_session_expiry_follows_the_configured_ttl(self):
+        with override_settings(CASHFREE_SUBSCRIPTION_SESSION_TTL_MINUTES=15):
+            gw, session = adapter([
+                FakeResponse(200, {"subscription_id": "s", "subscription_session_id": "sess"})
+            ])
+            before = timezone.now()
+            gw.create_subscription(self.tenant, plan())
+        body = json.loads(session.request.call_args.kwargs["data"])
+        session_expiry = datetime.fromisoformat(body["subscription_meta"]["session_id_expiry"])
+        minutes = (session_expiry - before).total_seconds() / 60
+        self.assertTrue(14 <= minutes <= 16, minutes)
+
+    def test_timestamps_are_second_precision_with_an_offset(self):
+        # The rejected value was "2026-09-16T14:19:39.471321+00:00"; no
+        # documented Cashfree example carries sub-second precision.
+        gw, session = adapter([
+            FakeResponse(200, {"subscription_id": "s", "subscription_session_id": "sess"})
+        ])
+        gw.create_subscription(self.tenant, plan())
+        body = json.loads(session.request.call_args.kwargs["data"])
+        for value in (
+            body["subscription_expiry_time"],
+            body["subscription_meta"]["session_id_expiry"],
+        ):
+            with self.subTest(value=value):
+                self.assertNotIn(".", value)
+                self.assertRegex(value, r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}([+-]\d{2}:\d{2}|Z)$")
+                self.assertIsNotNone(datetime.fromisoformat(value).tzinfo)
+
+    def test_the_authorization_details_are_left_alone(self):
+        # Pinned deliberately: the expiry fix must not drift the mandate's
+        # authorisation terms, which Cashfree never complained about.
+        gw, session = adapter([
+            FakeResponse(200, {"subscription_id": "s", "subscription_session_id": "sess"})
+        ])
+        gw.create_subscription(self.tenant, plan())
+        body = json.loads(session.request.call_args.kwargs["data"])
+        self.assertEqual(body["authorization_details"], {
+            "authorization_amount": 1,
+            "authorization_amount_refund": True,
+            "payment_methods": ["upi", "card", "enach"],
+        })
+        self.assertEqual(body["plan_details"], {"plan_id": "tenora_pro"})
 
     def test_an_owner_without_a_phone_is_told_to_add_one(self):
         self.owner.phone = ""

@@ -56,6 +56,11 @@ _TIMEOUT = 20
 #: Cashfree's limit on plan_name (1-40 characters).
 PLAN_NAME_MAX = 40
 
+#: How long the mandate stays chargeable. A Tenora subscription runs until it
+#: is cancelled, so this is a horizon, not a term — the same ~10 years the
+#: Razorpay adapter expresses as its total billing-cycle count.
+MANDATE_YEARS = 10
+
 # Tenora's Plan.interval -> Cashfree's PERIODIC plan interval.
 _INTERVAL = {
     "MONTHLY": ("MONTH", 1),
@@ -114,6 +119,13 @@ def cents_to_amount(cents: int) -> float:
 #: Request fields that identify a PERSON rather than a plan or an amount. They
 #: are replaced, not dropped, so a log line still shows the field was sent.
 _PII_FIELDS = ("customer_details", "subscription_tags")
+
+
+def _iso_seconds(value) -> str:
+    """An ISO-8601 timestamp at SECOND precision with an offset, as Cashfree's
+    examples show. Python's default isoformat() appends microseconds, which no
+    documented example carries."""
+    return value.replace(microsecond=0).isoformat()
 
 
 def _sanitized(payload):
@@ -299,7 +311,18 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
         # retried checkout after a failed authorisation is a new mandate rather
         # than a collision on an id Cashfree already holds.
         subscription_id = f"tnrsub_{tenant.id.hex}_{int(time.time())}"[:250]
-        expires_at = timezone.now() + timedelta(
+        now = timezone.now()
+        # Two DIFFERENT clocks, conflated once and rejected by Cashfree with
+        # "Invalid subscription expiresOn":
+        #   subscription_expiry_time — when the MANDATE itself stops being
+        #       valid, i.e. how long Tenora may keep charging this subscriber.
+        #   session_id_expiry       — how long this checkout link stays open.
+        # A Tenora subscription renews until it is cancelled, so the mandate is
+        # given the same ~10-year horizon the Razorpay adapter uses for its
+        # billing-cycle count, while the short TTL stays on the session where
+        # it belongs.
+        mandate_expires_at = now + timedelta(days=365 * MANDATE_YEARS)
+        session_expires_at = now + timedelta(
             minutes=getattr(settings, "CASHFREE_SUBSCRIPTION_SESSION_TTL_MINUTES", 60)
         )
         status_code, body = self._request("POST", "/subscriptions", {
@@ -320,8 +343,9 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
             "subscription_meta": {
                 "return_url": f"{settings.FRONTEND_URL.rstrip('/')}/subscription",
                 "notification_channel": ["EMAIL"],
+                "session_id_expiry": _iso_seconds(session_expires_at),
             },
-            "subscription_expiry_time": expires_at.isoformat(),
+            "subscription_expiry_time": _iso_seconds(mandate_expires_at),
             "subscription_tags": {"tenant_id": str(tenant.id), "plan_code": plan.code},
         })
         if status_code not in (200, 201):
