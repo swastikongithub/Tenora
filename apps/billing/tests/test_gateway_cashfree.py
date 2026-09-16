@@ -110,6 +110,44 @@ class CreatePlanTests(TestCase):
             with self.assertRaises(ProviderUnavailable):
                 gw.create_plan(plan())
 
+    def test_a_rejection_is_logged_with_the_providers_error_but_no_secrets(self):
+        gw, _ = adapter([
+            FakeResponse(400, {
+                "code": "plan_recurring_amount_missing",
+                "type": "invalid_request_error",
+                "message": "plan_recurring_amount is required for PERIODIC plans",
+            })
+        ])
+        with self.assertLogs("apps.billing.gateway.cashfree", level="WARNING") as logs:
+            with self.assertRaises(ProviderUnavailable) as raised:
+                gw.create_plan(plan())
+        line = chr(10).join(logs.output)
+        # The provider's own identification of the problem reaches the log…
+        self.assertIn("plan_recurring_amount_missing", line)
+        self.assertIn("invalid_request_error", line)
+        self.assertIn("POST /plans", line)
+        self.assertIn("400", line)
+        # …and so does the exception, which the platform view logs.
+        self.assertIn("plan_recurring_amount_missing", str(raised.exception))
+        # Credentials never appear: they are headers, and headers are not logged.
+        self.assertNotIn(SECRET, line)
+        self.assertNotIn(CLIENT_ID, line)
+
+    def test_a_subscription_rejection_never_logs_subscriber_contact_details(self):
+        tenant, owner = make_workspace("cf-log")
+        owner.phone = "9876543210"
+        owner.save(update_fields=["phone"])
+        gw, _ = adapter([FakeResponse(400, {"code": "plan_id_invalid", "message": "no such plan"})])
+        with self.assertLogs("apps.billing.gateway.cashfree", level="WARNING") as logs:
+            with self.assertRaises(ProviderUnavailable):
+                gw.create_subscription(tenant, plan())
+        line = chr(10).join(logs.output)
+        self.assertIn("plan_id_invalid", line)
+        self.assertIn("<redacted>", line)
+        self.assertNotIn("9876543210", line)
+        self.assertNotIn(owner.email, line)
+        self.assertNotIn(SECRET, line)
+
     def test_missing_credentials_fail_closed_without_a_request(self):
         with override_settings(CASHFREE_SUBSCRIPTION_CLIENT_ID="", CASHFREE_SUBSCRIPTION_CLIENT_SECRET=""):
             gw, session = adapter([FakeResponse(200, {})])

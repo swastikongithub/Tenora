@@ -108,6 +108,36 @@ def cents_to_amount(cents: int) -> float:
     return float(Decimal(cents) / Decimal(100))
 
 
+#: Request fields that identify a PERSON rather than a plan or an amount. They
+#: are replaced, not dropped, so a log line still shows the field was sent.
+_PII_FIELDS = ("customer_details", "subscription_tags")
+
+
+def _sanitized(payload):
+    """A request body safe to log: no credentials (those are headers and never
+    appear here) and no subscriber contact details."""
+    if not isinstance(payload, dict):
+        return "{}"
+    redacted = {
+        key: ("<redacted>" if key in _PII_FIELDS else value)
+        for key, value in payload.items()
+    }
+    return json.dumps(redacted, default=str)[:600]
+
+
+def _safe_error(body):
+    """The provider's own error identification — code, type and message — and
+    nothing else from its response."""
+    if not isinstance(body, dict):
+        return ""
+    parts = [
+        f"{key}={body[key]!r}"
+        for key in ("code", "type", "message")
+        if body.get(key)
+    ]
+    return " ".join(parts)[:400] or "(no error fields in response)"
+
+
 def _says_already_exists(body) -> bool:
     text = " ".join(
         str(body.get(key, "")) for key in ("message", "code", "type", "error")
@@ -168,6 +198,19 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
             body = response.json() if response.content else {}
         except ValueError:
             raise ProviderUnavailable(f"{method} {path} returned a non-JSON body")
+        if response.status_code >= 400:
+            # Diagnostics for an operator reading the service log. Credentials
+            # live only in `headers`, which is never touched here; the request
+            # body is sanitized because a subscription carries the subscriber's
+            # email and phone.
+            logger.warning(
+                "cashfree subscriptions %s %s -> %s %s | request: %s",
+                method,
+                path,
+                response.status_code,
+                _safe_error(body),
+                _sanitized(payload),
+            )
         return response.status_code, body if isinstance(body, dict) else {"data": body}
 
     # --- plans ------------------------------------------------------------
@@ -203,7 +246,9 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
             status_code in (400, 422) and _says_already_exists(body)
         ):
             return plan_id
-        raise ProviderUnavailable(f"create plan failed ({status_code})")
+        raise ProviderUnavailable(
+            f"create plan failed ({status_code}) {_safe_error(body)}"
+        )
 
     # --- subscriptions ----------------------------------------------------
 
@@ -268,7 +313,9 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
             "subscription_tags": {"tenant_id": str(tenant.id), "plan_code": plan.code},
         })
         if status_code not in (200, 201):
-            raise ProviderUnavailable(f"create subscription failed ({status_code})")
+            raise ProviderUnavailable(
+                f"create subscription failed ({status_code}) {_safe_error(body)}"
+            )
         session_id = body.get("subscription_session_id") or ""
         if not session_id:
             raise ProviderUnavailable("create subscription returned no checkout session")
