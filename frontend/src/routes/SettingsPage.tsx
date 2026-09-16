@@ -25,6 +25,7 @@ import { queryKeys } from '../lib/query-keys'
 import { useTenant } from '../lib/tenant'
 import { PageHeader, QueryState, Select, UsageMeter } from './property/ui'
 import { errorMessage, fieldError } from '../lib/property/errors'
+import { canClose, useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 function Panel({ id, title, description, children }: { id: string; title: string; description?: string; children: React.ReactNode }) {
   return (
@@ -258,7 +259,11 @@ function MembershipsPanel() {
   const { isOwner } = useWorkspaceRole()
   const queryClient = useQueryClient()
   const members = usePropertyQuery<MemberRow[]>('memberships', '/memberships/', {}, { enabled: isOwner })
-  const [confirm, setConfirm] = useState<null | 'leave' | 'close' | 'transfer'>(null)
+  // Leaving/closing works on whichever row you pick — see useWorkspaceLifecycle.
+  // Transferring ownership stays tied to the ACTIVE workspace: it needs that
+  // workspace's member list to choose the new owner from.
+  const lifecycle = useWorkspaceLifecycle()
+  const [confirm, setConfirm] = useState<null | 'transfer'>(null)
   const [target, setTarget] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -267,8 +272,6 @@ function MembershipsPanel() {
     setBusy(true)
     setError(null)
     try {
-      if (confirm === 'leave') await apiClient.post('/memberships/leave/')
-      if (confirm === 'close') await apiClient.post('/workspace/close/')
       if (confirm === 'transfer') await apiClient.post(`/memberships/${target || residents[0]?.id}/transfer-ownership/`)
       setConfirm(null)
       await queryClient.invalidateQueries({ queryKey: queryKeys.tenantsMe() })
@@ -281,16 +284,6 @@ function MembershipsPanel() {
     }
   }
   const copy = {
-    leave: {
-      title: `Leave ${currentTenant?.name ?? 'this workspace'}?`,
-      body: 'You lose access to this workspace immediately. Your Tenora account stays, and your past bills and receipts remain on record with the owner. You can create your own workspace afterwards.',
-      cta: 'Leave workspace',
-    },
-    close: {
-      title: `Close ${currentTenant?.name ?? 'this workspace'}?`,
-      body: 'Only possible once no other members remain. Pending invitations are cancelled and nobody can open the workspace again. Its billing history is retained.',
-      cta: 'Close workspace',
-    },
     transfer: {
       title: 'Transfer ownership',
       body: 'The resident you choose becomes the owner (subject to their own plan limit). You become a member and can then leave.',
@@ -301,30 +294,34 @@ function MembershipsPanel() {
     <Panel id="memberships" title="Memberships" description="Workspaces you belong to. Leaving a workspace does not delete your account.">
       <ul className="flex flex-col gap-2">
         {tenants.map((t) => (
-          <li key={t.id} className="flex items-center justify-between gap-2 text-body">
-            <span className="text-primary">{t.name}</span>
-            <Badge variant={t.role === 'OWNER' ? 'accent' : 'neutral'}>{t.role === 'OWNER' ? 'Owner' : 'Resident'}</Badge>
+          <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 text-body">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-primary">{t.name}</span>
+              {t.id === currentTenant?.id && <Badge variant="neutral">Active</Badge>}
+            </span>
+            <span className="flex items-center gap-2">
+              <Badge variant={t.role === 'OWNER' ? 'accent' : 'neutral'}>{t.role === 'OWNER' ? 'Owner' : 'Resident'}</Badge>
+              <Button variant="secondary" size="sm" onClick={() => lifecycle.request('leave', t)}>
+                Leave
+              </Button>
+              {canClose(t) && (
+                <Button variant="ghost" size="sm" onClick={() => lifecycle.request('close', t)}>
+                  Close
+                </Button>
+              )}
+            </span>
           </li>
         ))}
         {tenants.length === 0 && <li className="text-body text-secondary">You’re not in any workspace.</li>}
       </ul>
-      {currentTenant && (
+      {currentTenant && isOwner && residents.length > 0 && (
         <div className="mt-4 flex flex-wrap gap-2">
-          <Button variant="secondary" size="sm" onClick={() => { setError(null); setConfirm('leave') }}>
-            Leave {currentTenant.name}
+          <Button variant="secondary" size="sm" onClick={() => { setError(null); setConfirm('transfer') }}>
+            Transfer ownership of {currentTenant.name}
           </Button>
-          {isOwner && residents.length > 0 && (
-            <Button variant="secondary" size="sm" onClick={() => { setError(null); setConfirm('transfer') }}>
-              Transfer ownership
-            </Button>
-          )}
-          {isOwner && (
-            <Button variant="ghost" size="sm" onClick={() => { setError(null); setConfirm('close') }}>
-              Close workspace
-            </Button>
-          )}
         </div>
       )}
+      {lifecycle.dialog}
       <Modal
         open={confirm !== null}
         onClose={() => setConfirm(null)}

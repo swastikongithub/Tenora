@@ -257,11 +257,11 @@ describe('settings', () => {
   })
 
   it('a resident gets no workspace or subscription settings, and can leave the workspace', async () => {
-    let left = false
+    let leaveTarget: string | null = null
     server.use(
       ...settingsHandlers(),
-      http.post(apiUrl('/memberships/leave/'), () => {
-        left = true
+      http.post(apiUrl('/memberships/leave/'), ({ request }) => {
+        leaveTarget = request.headers.get('X-Tenant-ID')
         return new HttpResponse(null, { status: 200 })
       }),
     )
@@ -269,11 +269,14 @@ describe('settings', () => {
     expect(await screen.findByRole('heading', { name: 'Memberships' })).toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Workspace profile & billing defaults' })).not.toBeInTheDocument()
     expect(screen.queryByRole('heading', { name: 'Plan & subscription' })).not.toBeInTheDocument()
-    await userEvent.click(await screen.findByRole('button', { name: `Leave ${TENANT_B.name}` }))
+    // Each membership row carries its own action, so any workspace can be left
+    // without switching into it first (§27.1).
+    const row = (await screen.findByText(TENANT_B.name)).closest('li')!
+    await userEvent.click(within(row).getByRole('button', { name: 'Leave' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/Your Tenora account stays/)).toBeInTheDocument()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Leave workspace' }))
-    await waitFor(() => expect(left).toBe(true))
+    await waitFor(() => expect(leaveTarget).toBe(TENANT_B.id))
   })
 
   it('delete account stays disabled until the email is typed exactly', async () => {

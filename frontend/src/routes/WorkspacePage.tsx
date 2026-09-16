@@ -23,11 +23,13 @@ import { Alert, Badge, Button, Card, EmptyState, Skeleton } from '../components'
 import { queryKeys } from '../lib/query-keys'
 import { useTenant, type TenantMembership } from '../lib/tenant'
 import { CreateWorkspaceModal } from './CreateWorkspaceModal'
+import { canClose, useWorkspaceLifecycle } from './useWorkspaceLifecycle'
 
 export function WorkspacePage() {
   const { tenants, status, switchTenant, refetch } = useTenant()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const lifecycle = useWorkspaceLifecycle()
 
   const [modalOpen, setModalOpen] = useState(false)
   const [pendingId, setPendingId] = useState<string | null>(null)
@@ -106,11 +108,14 @@ export function WorkspacePage() {
           <>
             <ul aria-label="Your workspaces" className="flex flex-col gap-2">
               {tenants.map((tenant) => (
-                <li key={tenant.id}>
+                <li
+                  key={tenant.id}
+                  className="flex items-center gap-2 rounded-md border border-subtle bg-raised pr-3 transition-colors focus-within:border-strong hover:bg-overlay"
+                >
                   <button
                     type="button"
                     onClick={() => enter(tenant.id)}
-                    className="flex w-full items-center justify-between gap-3 rounded-md border border-subtle bg-raised p-4 text-left transition-colors hover:bg-overlay focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
+                    className="flex min-w-0 flex-1 items-center justify-between gap-3 p-4 text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-600"
                   >
                     <span className="min-w-0">
                       <span className="block truncate text-label text-primary">
@@ -124,6 +129,23 @@ export function WorkspacePage() {
                       {tenant.role}
                     </Badge>
                   </button>
+                  {/* Act on ANY workspace from here — no need to enter it first. */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => lifecycle.request('leave', tenant)}
+                  >
+                    Leave
+                  </Button>
+                  {canClose(tenant) && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => lifecycle.request('close', tenant)}
+                    >
+                      Close
+                    </Button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -143,6 +165,7 @@ export function WorkspacePage() {
         onClose={() => setModalOpen(false)}
         onCreated={handleCreated}
       />
+      {lifecycle.dialog}
     </section>
   )
 }

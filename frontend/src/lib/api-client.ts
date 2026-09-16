@@ -30,6 +30,18 @@ interface RequestOptions {
   signal?: AbortSignal
   /** Resolve the body as a Blob (an authorized image/PDF download) instead of JSON. */
   asBlob?: boolean
+  /**
+   * Send this workspace in `X-Tenant-ID` instead of the active one, for the
+   * workspace-lifecycle actions that act on a workspace you are not currently
+   * operating as (leaving or closing one from a list — §27.1).
+   *
+   * This is NOT a way to smuggle tenant authority: the header is the project's
+   * only tenant channel either way, and the backend still resolves the caller's
+   * ACTIVE Membership for whatever id arrives and 403s/404s when there isn't
+   * one. It exists so the target is stated explicitly at the call site rather
+   * than by hand-setting a header the client would otherwise overwrite.
+   */
+  tenantId?: string
 }
 
 const TENANT_BODY_KEYS = ['tenant_id', 'tenant', 'tenantId']
@@ -114,7 +126,7 @@ async function request<T = unknown>(
   }
 
   if (!global) {
-    const tenantId = getCurrentTenantId()
+    const tenantId = options.tenantId ?? getCurrentTenantId()
     // No tenant selected yet on a tenant-scoped call: omit the header and let
     // the backend answer 400. In practice TenantProvider guarantees a tenant is
     // set before any tenant-scoped query runs.

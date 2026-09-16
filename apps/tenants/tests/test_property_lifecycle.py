@@ -288,6 +288,62 @@ class MembershipLifecycleTests(APITestCase):
         self.assertEqual(self.client.get("/api/memberships/").status_code, 403)
         self.assertEqual(PlanLimitService.owned_workspace_count(self.owner), 0)
 
+    def test_a_member_leaves_the_workspace_they_pick_not_the_active_one(self):
+        # §27.1: belonging to several workspaces must not force leaving them in
+        # some order. The target is the one named by X-Tenant-ID on THIS call.
+        other, other_owner = make_workspace("second")
+        add_resident(other, other_owner, "leaver@example.com")
+        third, third_owner = make_workspace("third")
+        add_resident(third, third_owner, "leaver@example.com")
+
+        # Operating as `self.tenant`, leave `other` — and stay in both the rest.
+        bearer(self.client, self.user, other)
+        self.assertEqual(self.client.post("/api/memberships/leave/").status_code, 200)
+        self.assertEqual(Membership.objects.get(user=self.user, tenant=other).status, "LEFT")
+        self.assertEqual(Membership.objects.get(user=self.user, tenant=self.tenant).status, "ACTIVE")
+        self.assertEqual(Membership.objects.get(user=self.user, tenant=third).status, "ACTIVE")
+
+        bearer(self.client, self.user, self.tenant)
+        self.assertEqual(self.client.get("/api/bills/").status_code, 200)
+        remaining = {t["id"] for t in self.client.get("/api/tenants/me/").data}
+        self.assertEqual(remaining, {str(self.tenant.id), str(third.id)})
+
+    def test_leaving_a_workspace_you_do_not_belong_to_is_refused(self):
+        stranger, _ = make_workspace("stranger")
+        bearer(self.client, self.user, stranger)
+        resp = self.client.post("/api/memberships/leave/")
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(Membership.objects.filter(tenant=stranger, status="LEFT").count(), 0)
+
+    def test_an_owner_closes_the_workspace_they_pick_and_keeps_the_others(self):
+        doomed, owner = make_workspace("doomed")
+        kept, _ = make_workspace("kept", owner=owner)
+        bearer(self.client, owner, doomed)
+        self.assertEqual(self.client.post("/api/workspace/close/").status_code, 200)
+        doomed.refresh_from_db()
+        kept.refresh_from_db()
+        self.assertIsNotNone(doomed.closed_at)
+        self.assertIsNone(kept.closed_at)
+        # The workspace that was kept is untouched and still usable.
+        bearer(self.client, owner, kept)
+        self.assertEqual(self.client.get("/api/memberships/").status_code, 200)
+        self.assertEqual(PlanLimitService.owned_workspace_count(owner), 1)
+
+    def test_a_resident_cannot_close_a_workspace_they_only_belong_to(self):
+        bearer(self.client, self.user, self.tenant)
+        self.assertEqual(self.client.post("/api/workspace/close/").status_code, 403)
+        self.tenant.refresh_from_db()
+        self.assertIsNone(self.tenant.closed_at)
+
+    def test_closing_one_workspace_leaves_the_others_billing_history_alone(self):
+        doomed, owner = make_workspace("doomed2")
+        kept, _ = make_workspace("kept2", owner=owner)
+        keeper, _ = add_resident(kept, owner, "stays@example.com")
+        bearer(self.client, owner, doomed)
+        self.assertEqual(self.client.post("/api/workspace/close/").status_code, 200)
+        self.assertEqual(Membership.objects.get(user=keeper, tenant=kept).status, "ACTIVE")
+        self.assertEqual(Resident.objects.filter(tenant=kept, status="ACTIVE").count(), 1)
+
     def test_suspension_check_does_not_leak_to_former_members(self):
         MembershipService.leave(user=self.user, tenant=self.tenant)
         Tenant.objects.filter(pk=self.tenant.pk).update(is_active=False)

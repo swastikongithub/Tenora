@@ -14,7 +14,7 @@ import {
   tenantsMeHandler,
 } from '../../test/fixtures'
 import { AuthProvider } from '../../lib/auth'
-import { setCurrentTenantId } from '../../lib/tenant'
+import { getCurrentTenantId, setCurrentTenantId } from '../../lib/tenant'
 import { createQueryClient } from '../../lib/query-client'
 import type { TenantMembership } from '../../lib/tenant'
 import { AppRoutes } from '../AppRoutes'
@@ -164,5 +164,106 @@ describe('WorkspacePage', () => {
       within(dialog).getByText('A tenant with this slug already exists.'),
     ).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+})
+
+describe('WorkspacePage — leaving and closing without switching first', () => {
+  it('leaves the workspace whose row was clicked, not the active one', async () => {
+    // Active workspace is A; the user leaves B from B's own row.
+    setCurrentTenantId(TENANT_A.id)
+    let leaveTarget: string | null = null
+    let remaining = [TENANT_A, TENANT_B]
+    server.use(
+      ...authHandlers(),
+      http.get(apiUrl('/tenants/me/'), () => HttpResponse.json(remaining)),
+      http.post(apiUrl('/memberships/leave/'), ({ request }) => {
+        leaveTarget = request.headers.get('X-Tenant-ID')
+        remaining = [TENANT_A]
+        return new HttpResponse(null, { status: 200 })
+      }),
+    )
+
+    renderWorkspace()
+    const list = await screen.findByRole('list', { name: 'Your workspaces' })
+    const betaRow = within(list).getByText('Beta LLC').closest('li')!
+    await userEvent.click(within(betaRow).getByRole('button', { name: 'Leave' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Leave Beta LLC?')
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Leave workspace' }),
+    )
+
+    await waitFor(() => expect(leaveTarget).toBe(TENANT_B.id))
+    // The active workspace is untouched and the list drops only Beta.
+    expect(getCurrentTenantId()).toBe(TENANT_A.id)
+    await waitFor(() =>
+      expect(within(list).queryByText('Beta LLC')).not.toBeInTheDocument(),
+    )
+    expect(within(list).getByText('Alpha Corp')).toBeInTheDocument()
+  })
+
+  it('offers Close only for owned workspaces and requires the name typed', async () => {
+    setCurrentTenantId(TENANT_B.id)
+    let closeTarget: string | null = null
+    server.use(
+      ...authHandlers(),
+      tenantsMeHandler([TENANT_A, TENANT_B]),
+      http.post(apiUrl('/workspace/close/'), ({ request }) => {
+        closeTarget = request.headers.get('X-Tenant-ID')
+        return new HttpResponse(null, { status: 200 })
+      }),
+    )
+
+    renderWorkspace()
+    const alphaRow = (await screen.findByText('Alpha Corp')).closest('li')!
+    const list = await screen.findByRole('list', { name: 'Your workspaces' })
+    const betaRow = within(list).getByText('Beta LLC').closest('li')!
+    // Beta is a MEMBER row — no Close offered there.
+    expect(within(betaRow).queryByRole('button', { name: 'Close' })).toBeNull()
+
+    await userEvent.click(within(alphaRow).getByRole('button', { name: 'Close' }))
+    const dialog = await screen.findByRole('dialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Close workspace' })
+    expect(confirm).toBeDisabled()
+
+    await userEvent.type(
+      within(dialog).getByLabelText('Type Alpha Corp to confirm'),
+      'Alpha Corp',
+    )
+    expect(confirm).toBeEnabled()
+    await userEvent.click(confirm)
+    await waitFor(() => expect(closeTarget).toBe(TENANT_A.id))
+  })
+
+  it('surfaces a refused leave and keeps the membership listed', async () => {
+    setCurrentTenantId(TENANT_A.id)
+    server.use(
+      ...authHandlers(),
+      tenantsMeHandler([TENANT_A, TENANT_B]),
+      http.post(apiUrl('/memberships/leave/'), () =>
+        HttpResponse.json(
+          {
+            detail:
+              "You are this workspace's only owner. Transfer ownership to a resident, or close the workspace, before leaving.",
+            code: 'last_owner',
+          },
+          { status: 409 },
+        ),
+      ),
+    )
+
+    renderWorkspace()
+    const list = await screen.findByRole('list', { name: 'Your workspaces' })
+    const alphaRow = within(list).getByText('Alpha Corp').closest('li')!
+    await userEvent.click(within(alphaRow).getByRole('button', { name: 'Leave' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.click(
+      within(dialog).getByRole('button', { name: 'Leave workspace' }),
+    )
+
+    expect(await within(dialog).findByText(/only owner/)).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(within(list).getByText('Alpha Corp')).toBeInTheDocument()
   })
 })
