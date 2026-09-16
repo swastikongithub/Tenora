@@ -392,6 +392,42 @@ class SubscriptionStateTests(TestCase):
         gw, _ = adapter([requests.ConnectTimeout("boom")])
         self.assertFalse(gw.confirm_checkout_report("tnrsub_x", {}))
 
+    def test_abandoned_is_three_valued_and_fails_closed(self):
+        cases = {
+            # Explicitly dead — the mandate can never authorise now.
+            "INITIALIZED": True,
+            "CANCELLED": True,
+            "CUSTOMER_CANCELLED": True,
+            "EXPIRED": True,
+            "COMPLETED": True,
+            # Explicitly alive — including a bank approval that may take days.
+            "ACTIVE": False,
+            "BANK_APPROVAL_PENDING": False,
+            "ON_HOLD": False,
+            "PAUSED": False,
+            # A status this adapter has never seen: unknown, NEVER dead.
+            "SOME_FUTURE_STATUS": None,
+            "": None,
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                gw, _ = adapter([FakeResponse(200, {"subscription_status": raw})])
+                self.assertIs(gw.checkout_is_abandoned("tnrsub_x"), expected)
+
+    def test_an_unknown_status_is_logged_rather_than_guessed(self):
+        gw, _ = adapter([FakeResponse(200, {"subscription_status": "SOME_FUTURE_STATUS"})])
+        with self.assertLogs("apps.billing.gateway.cashfree", level="WARNING") as logs:
+            self.assertIsNone(gw.checkout_is_abandoned("tnrsub_x"))
+        self.assertIn("SOME_FUTURE_STATUS", chr(10).join(logs.output))
+
+    def test_a_subscription_the_provider_has_never_heard_of_is_abandoned(self):
+        gw, _ = adapter([FakeResponse(404, {"message": "not found"})])
+        self.assertIs(gw.checkout_is_abandoned("tnrsub_gone"), True)
+
+    def test_an_unreachable_provider_is_unknown_not_abandoned(self):
+        gw, _ = adapter([requests.ConnectTimeout("boom")])
+        self.assertIsNone(gw.checkout_is_abandoned("tnrsub_x"))
+
     def test_a_browser_signature_is_never_accepted_for_this_provider(self):
         gw, _ = adapter([])
         self.assertFalse(gw.verify_checkout_signature("pay", "sub", "sig"))

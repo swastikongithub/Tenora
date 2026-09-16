@@ -11,16 +11,27 @@ overridden secret) so the cryptographic check genuinely runs.
 
 import hashlib
 import hmac
+import threading
 from unittest import mock
 
-from django.test import override_settings
+from django.db import connection
+from django.test import TransactionTestCase, override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.billing.gateway import PaymentGatewayAdapter, ProviderCheckout
-from apps.billing.models import Plan, Subscription, SubscriptionCheckout
-from apps.billing.services import CheckoutService
+from apps.billing.models import Plan, Subscription, SubscriptionCheckout, WebhookEvent
+from datetime import timedelta
+
+from django.utils import timezone
+
+from apps.billing.gateway import EventType
+from apps.billing.services import (
+    CheckoutPlanMismatch,
+    CheckoutService,
+    WebhookProcessingService,
+)
 from apps.tenants.models import Membership, Tenant
 from apps.users.models import User
 
@@ -255,6 +266,144 @@ class CheckoutConfirmTests(CheckoutTestBase):
         self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+@override_settings(SUBSCRIPTION_CHECKOUT_STALE_AFTER_MINUTES=60)
+class AbandonedCheckoutTests(CheckoutTestBase):
+    """
+    An in-flight checkout must not lock a workspace out of every other plan
+    forever, and must not be discarded while it is still alive.
+    """
+
+    def _in_flight(self, plan, *, external_id="sub_OLD", status=None, age_minutes=0):
+        checkout = SubscriptionCheckout.objects.create(
+            tenant=self.tenant,
+            plan=plan,
+            external_subscription_id=external_id,
+            status=status or SubscriptionCheckout.Status.CREATED,
+        )
+        if age_minutes:
+            SubscriptionCheckout.objects.filter(pk=checkout.pk).update(
+                updated_at=timezone.now() - timedelta(minutes=age_minutes)
+            )
+        return SubscriptionCheckout.objects.get(pk=checkout.pk)
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_a_valid_checkout_for_the_same_plan_is_reused(self, get_gateway):
+        gateway = _gateway("sub_NEW")
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro)
+
+        checkout = CheckoutService.create_checkout(tenant=self.tenant, plan=self.pro)
+
+        self.assertEqual(checkout.external_subscription_id, "sub_OLD")
+        gateway.create_subscription.assert_not_called()
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_a_live_checkout_still_blocks_a_different_plan(self, get_gateway):
+        gateway = _gateway("sub_NEW")
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro, age_minutes=0)
+
+        with self.assertRaises(CheckoutPlanMismatch):
+            CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+        gateway.create_subscription.assert_not_called()
+        # Not even asked: inside the window, age alone settles it.
+        gateway.checkout_is_abandoned.assert_not_called()
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_an_old_checkout_the_provider_calls_live_still_blocks(self, get_gateway):
+        # eNACH bank approval can take days — age alone must never discard it.
+        gateway = _gateway("sub_NEW")
+        gateway.checkout_is_abandoned.return_value = False
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro, age_minutes=180)
+
+        with self.assertRaises(CheckoutPlanMismatch):
+            CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+        gateway.create_subscription.assert_not_called()
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_an_unreachable_provider_never_counts_as_abandoned(self, get_gateway):
+        gateway = _gateway("sub_NEW")
+        gateway.checkout_is_abandoned.return_value = None  # unknown
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro, age_minutes=180)
+
+        with self.assertRaises(CheckoutPlanMismatch):
+            CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+        gateway.create_subscription.assert_not_called()
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_a_confirmed_checkout_is_never_replaced(self, get_gateway):
+        # Its authorisation succeeded; the activation webhook may be seconds away.
+        gateway = _gateway("sub_NEW")
+        gateway.checkout_is_abandoned.return_value = True
+        get_gateway.return_value = gateway
+        self._in_flight(
+            self.pro, status=SubscriptionCheckout.Status.CONFIRMED, age_minutes=600
+        )
+
+        with self.assertRaises(CheckoutPlanMismatch):
+            CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+        gateway.create_subscription.assert_not_called()
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_a_stale_abandoned_checkout_is_replaced_by_the_new_plan(self, get_gateway):
+        gateway = _gateway("sub_NEW")
+        gateway.checkout_is_abandoned.return_value = True
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro, age_minutes=180)
+
+        checkout = CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+
+        self.assertEqual(checkout.plan_id, self.annual.id)
+        self.assertEqual(checkout.external_subscription_id, "sub_NEW")
+        self.assertEqual(checkout.status, SubscriptionCheckout.Status.CREATED)
+        # Still exactly one checkout for the tenant (OneToOne), re-pointed.
+        self.assertEqual(SubscriptionCheckout.objects.count(), 1)
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_a_replaced_checkout_can_no_longer_activate_its_old_plan(self, get_gateway):
+        gateway = _gateway("sub_NEW")
+        gateway.checkout_is_abandoned.return_value = True
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro, age_minutes=180)
+        CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+
+        # A delayed ACTIVATED for the ABANDONED mandate arrives.
+        event = WebhookEvent.objects.create(
+            external_event_id="evt_late",
+            event_type=EventType.ACTIVATED,
+            external_subscription_id="sub_OLD",
+            raw_payload={},
+        )
+        WebhookProcessingService.process_event(event)
+
+        # It matches no checkout, so it creates nothing — least of all a
+        # subscription for the plan the customer walked away from.
+        self.assertEqual(Subscription.objects.count(), 0)
+
+    @mock.patch("apps.billing.services.get_gateway")
+    def test_the_replacing_checkout_still_activates_normally(self, get_gateway):
+        gateway = _gateway("sub_NEW")
+        gateway.checkout_is_abandoned.return_value = True
+        get_gateway.return_value = gateway
+        self._in_flight(self.pro, age_minutes=180)
+        CheckoutService.create_checkout(tenant=self.tenant, plan=self.annual)
+
+        event = WebhookEvent.objects.create(
+            external_event_id="evt_new",
+            event_type=EventType.ACTIVATED,
+            external_subscription_id="sub_NEW",
+            raw_payload={},
+        )
+        WebhookProcessingService.process_event(event)
+
+        subscription = Subscription.objects.get()
+        self.assertEqual(subscription.plan_id, self.annual.id)
+        self.assertEqual(subscription.tenant_id, self.tenant.id)
+        self.assertEqual(subscription.status, Subscription.Status.ACTIVE)
+
+
 class CheckoutServiceUnitTests(CheckoutTestBase):
     @mock.patch("apps.billing.services.get_gateway")
     def test_create_checkout_returns_the_row(self, get_gateway):
@@ -266,3 +415,67 @@ class CheckoutServiceUnitTests(CheckoutTestBase):
 
         self.assertEqual(checkout.external_subscription_id, "sub_U")
         self.assertEqual(checkout.plan_id, self.pro.id)
+
+
+class ConcurrentCheckoutTests(TransactionTestCase):
+    """
+    The real concurrency guarantee, on real connections: `create_checkout`'s
+    `select_for_update()` must serialise two simultaneous starts so the gateway
+    is asked for a subscription exactly ONCE. TransactionTestCase (not
+    TestCase), because the guarantee is about COMMITTED rows across connections.
+    """
+
+    def setUp(self):
+        self.tenant = Tenant.objects.create(name="Concurrent", slug="concurrent")
+        self.owner = User.objects.create_user(
+            email="concurrent@example.com", password=PASSWORD
+        )
+        Membership.objects.create(
+            user=self.owner, tenant=self.tenant, role=Membership.Role.OWNER
+        )
+        self.plan = Plan.objects.create(
+            name="Pro", code="PRO", price_cents=2000, currency="INR",
+            interval="MONTHLY", external_plan_id="plan_EXT",
+        )
+
+    def test_two_simultaneous_starts_create_one_gateway_subscription(self):
+        calls = []
+        barrier = threading.Barrier(2)
+
+        def create_subscription(tenant, plan):
+            calls.append(plan.code)
+            return ProviderCheckout(
+                provider="mock",
+                external_subscription_id=f"sub_{len(calls)}",
+                session_token="sess",
+                public_key="",
+                mode="sandbox",
+            )
+
+        gateway = mock.Mock(spec=PaymentGatewayAdapter)
+        gateway.create_subscription.side_effect = create_subscription
+        results = []
+
+        def start():
+            barrier.wait()
+            try:
+                with mock.patch("apps.billing.services.get_gateway", return_value=gateway):
+                    results.append(
+                        CheckoutService.create_checkout(
+                            tenant=self.tenant, plan=self.plan
+                        ).external_subscription_id
+                    )
+            except Exception as exc:  # surfaced in the assertions below
+                results.append(exc)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=start) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(len(calls), 1, f"gateway called {len(calls)}x: {results}")
+        self.assertEqual(SubscriptionCheckout.objects.count(), 1)
+        self.assertEqual(set(results), {"sub_1"})

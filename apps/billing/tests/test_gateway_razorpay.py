@@ -291,6 +291,29 @@ class RazorpayFetchSubscriptionStateTests(SimpleTestCase):
                 self.assertEqual(state.status, expected)
                 self.assertEqual(state.raw_status, raw)
 
+    def test_abandoned_is_three_valued_and_fails_closed(self):
+        cases = {
+            "created": True,      # nobody ever authorised it
+            "cancelled": True,
+            "expired": True,
+            "completed": True,
+            "authenticated": False,  # authorised; activation may be in flight
+            "active": False,
+            "pending": False,
+            "halted": False,
+            "some_new_status": None,  # unknown, and never guessed as dead
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                self.client.subscription.fetch.return_value = self._entity(status=raw)
+                self.assertIs(self.adapter.checkout_is_abandoned("sub_1"), expected)
+
+    def test_an_unknown_status_is_logged_rather_than_guessed(self):
+        self.client.subscription.fetch.return_value = self._entity(status="some_new_status")
+        with self.assertLogs("apps.billing.gateway.razorpay", level="WARNING") as logs:
+            self.assertIsNone(self.adapter.checkout_is_abandoned("sub_1"))
+        self.assertIn("some_new_status", chr(10).join(logs.output))
+
     def test_carries_plan_id(self):
         self.client.subscription.fetch.return_value = self._entity(
             plan_id="plan_ABC"

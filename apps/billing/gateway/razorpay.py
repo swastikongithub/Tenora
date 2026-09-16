@@ -11,6 +11,7 @@ byte-for-byte the same; only their container changed (spec §4.2 / §7).
 import hashlib
 import hmac
 import json
+import logging
 
 import razorpay
 from django.conf import settings
@@ -26,6 +27,8 @@ from apps.billing.gateway.base import (
     WebhookParseError,
     epoch_to_datetime,
 )
+
+logger = logging.getLogger(__name__)
 
 # Local Plan.interval -> Razorpay (period, interval) for plan.create.
 _RAZORPAY_PERIOD = {
@@ -135,6 +138,35 @@ class RazorpayGatewayAdapter(PaymentGatewayAdapter):
             external_subscription_id,
             str(report.get("razorpay_signature") or ""),
         )
+
+    #: Razorpay statuses that mean this checkout can no longer become active.
+    #: "created" is a subscription nobody authorised; the rest are terminal.
+    _DEAD_RAW_STATUSES = frozenset({"created", "cancelled", "expired", "completed"})
+    #: ...and the ones that are explicitly still alive. "authenticated" is here,
+    #: not above: the mandate IS authorised and its activation webhook may still
+    #: be in flight.
+    _LIVE_RAW_STATUSES = frozenset({"authenticated", "active", "pending", "halted"})
+
+    def checkout_is_abandoned(self, external_subscription_id):
+        try:
+            state = self.fetch_subscription_state(external_subscription_id)
+        except ProviderUnavailable:
+            return None
+        if state is None:
+            return True
+        raw = state.raw_status.lower()
+        if raw in self._DEAD_RAW_STATUSES:
+            return True
+        if raw in self._LIVE_RAW_STATUSES:
+            return False
+        # Unrecognised — a status Razorpay added after this adapter was
+        # written. Never guess "dead": that would discard a live checkout.
+        logger.warning(
+            "razorpay: unrecognised subscription status %r — treating the "
+            "checkout's state as unknown",
+            state.raw_status,
+        )
+        return None
 
     def verify_webhook_signature(self, headers, raw_body: bytes) -> bool:
         secret = settings.RAZORPAY_WEBHOOK_SECRET

@@ -27,10 +27,12 @@ class MockGatewayAdapter(PaymentGatewayAdapter):
         *,
         webhook_signature_valid: bool = True,
         checkout_signature_valid: bool = True,
+        checkout_abandoned: bool | None = False,
         subscription_states=None,
     ):
         self.webhook_signature_valid = webhook_signature_valid
         self.checkout_signature_valid = checkout_signature_valid
+        self.checkout_abandoned = checkout_abandoned
         # D8 reconciliation config. Maps an external subscription id to what
         # `fetch_subscription_state` should do for it:
         #   - a dict  {"status": "ACTIVE", "raw_status": "active",
@@ -55,6 +57,11 @@ class MockGatewayAdapter(PaymentGatewayAdapter):
 
     def confirm_checkout_report(self, external_subscription_id, report) -> bool:
         return self.checkout_signature_valid
+
+    def checkout_is_abandoned(self, external_subscription_id):
+        """Whatever the test configured: False (a live checkout) by default,
+        True for an abandoned one, None for "provider unreachable"."""
+        return self.checkout_abandoned
 
     def verify_webhook_signature(self, headers, raw_body: bytes) -> bool:
         return self.webhook_signature_valid

@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from fractions import Fraction
 
+from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
@@ -241,7 +242,20 @@ class CheckoutService:
             if checkout.external_subscription_id:
                 if checkout.plan_id == plan.id:
                     return checkout  # reuse — a second click re-opens the same Checkout
-                raise CheckoutPlanMismatch()
+                if not CheckoutService._is_abandoned(checkout):
+                    raise CheckoutPlanMismatch()
+                # Abandoned: fall through and re-point this row at the newly
+                # requested plan. Overwriting `external_subscription_id` is also
+                # what disarms the old one — `_handle_activated` matches a
+                # webhook to a checkout BY that id, so a late activation for the
+                # abandoned mandate now matches nothing and creates nothing.
+                logger.info(
+                    "checkout %s for tenant %s abandoned (%s) — replacing with %s",
+                    checkout.external_subscription_id,
+                    tenant.id,
+                    checkout.plan.code,
+                    plan.code,
+                )
 
             created = get_gateway().create_subscription(tenant, plan)
             checkout.plan = plan
@@ -263,6 +277,32 @@ class CheckoutService:
                 ]
             )
             return checkout
+
+    @staticmethod
+    def _is_abandoned(checkout):
+        """
+        Whether `checkout` is dead enough to be replaced by one for a different
+        plan. Three gates, in cheapest-first order, ALL of which must agree:
+
+        1. Not CONFIRMED. A confirmed checkout's authorisation succeeded and its
+           activation webhook may be seconds away; it is never replaced.
+        2. Older than `SUBSCRIPTION_CHECKOUT_STALE_AFTER_MINUTES`. Inside that
+           window the customer may simply still be on the provider's page.
+        3. The PROVIDER agrees it was never taken up
+           (`checkout_is_abandoned`). This is the authoritative signal and the
+           reason step 2 alone is not enough: an eNACH mandate can sit in bank
+           approval for days and is very much alive. "Unknown" (the provider
+           could not be reached) is NOT abandoned — the workspace keeps its
+           mismatch error rather than losing a live checkout to an outage.
+        """
+        if checkout.status == SubscriptionCheckout.Status.CONFIRMED:
+            return False
+        stale_after = timedelta(
+            minutes=getattr(settings, "SUBSCRIPTION_CHECKOUT_STALE_AFTER_MINUTES", 60)
+        )
+        if timezone.now() - checkout.updated_at < stale_after:
+            return False
+        return get_gateway().checkout_is_abandoned(checkout.external_subscription_id) is True
 
     @staticmethod
     def confirm_checkout(tenant, subscription_id, report):

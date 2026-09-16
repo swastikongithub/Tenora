@@ -378,6 +378,37 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
             external_plan_id=(body.get("plan_details") or {}).get("plan_id"),
         )
 
+    #: Cashfree statuses that mean this mandate can no longer become active:
+    #: INITIALIZED — created, the customer never authorised it, and by the time
+    #: the domain asks, its checkout session has long expired; the rest are
+    #: terminal.
+    _DEAD_RAW_STATUSES = frozenset({"INITIALIZED", "CANCELLED", "CUSTOMER_CANCELLED", "EXPIRED", "COMPLETED"})
+    #: ...and the ones that are explicitly still alive. BANK_APPROVAL_PENDING is
+    #: here, not above: an eNACH approval can take days and is very much live.
+    _LIVE_RAW_STATUSES = frozenset({"ACTIVE", "ON_HOLD", "BANK_APPROVAL_PENDING", "PAUSED", "CARD_EXPIRED"})
+
+    def checkout_is_abandoned(self, external_subscription_id):
+        try:
+            state = self.fetch_subscription_state(external_subscription_id)
+        except ProviderUnavailable:
+            return None  # unknown — the caller must not treat this as dead
+        if state is None:
+            return True  # the provider has no such subscription at all
+        raw = state.raw_status.upper()
+        if raw in self._DEAD_RAW_STATUSES:
+            return True
+        if raw in self._LIVE_RAW_STATUSES:
+            return False
+        # A status this adapter has never seen. Cashfree may add one at any
+        # time, and guessing in either direction is unsafe — guessing "dead"
+        # would discard a live mandate. Unknown, so the caller decides nothing.
+        logger.warning(
+            "cashfree subscriptions: unrecognised subscription_status %r — "
+            "treating the checkout's state as unknown",
+            state.raw_status,
+        )
+        return None
+
     # --- checkout confirmation -------------------------------------------
 
     def confirm_checkout_report(self, external_subscription_id, report) -> bool:

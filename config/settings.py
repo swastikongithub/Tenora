@@ -237,6 +237,15 @@ RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 # the automated suite).
 PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "razorpay")
 
+# How long an in-flight SubscriptionCheckout is presumed live. Past this, a
+# checkout the customer never authorised no longer blocks that workspace from
+# starting a checkout for a DIFFERENT plan (stage-d2-spec.md §2 left no way out
+# of an abandoned one). Provider-neutral: the age is only the first gate, and
+# the provider is still asked whether the checkout is really dead.
+SUBSCRIPTION_CHECKOUT_STALE_AFTER_MINUTES = int(
+    os.environ.get("SUBSCRIPTION_CHECKOUT_STALE_AFTER_MINUTES", "60")
+)
+
 # Cashfree SUBSCRIPTIONS — the Tenora subscription domain (owner -> Tenora).
 # Separate from the CASHFREE_* settings further down, which belong to P9's
 # property payments (resident -> owner): a different Cashfree API family, a

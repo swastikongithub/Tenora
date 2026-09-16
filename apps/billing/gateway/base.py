@@ -255,6 +255,26 @@ class PaymentGatewayAdapter(abc.ABC):
         """
 
     @abc.abstractmethod
+    def checkout_is_abandoned(self, external_subscription_id: str) -> bool | None:
+        """
+        Whether the provider considers this in-flight checkout dead: created,
+        never taken up by the customer, and no longer capable of becoming an
+        active subscription.
+
+        Three-valued ON PURPOSE, because "I don't know" must not read as "safe
+        to discard":
+          True  — never authorised (or explicitly dead/unknown at the provider)
+          False — live: authorised, awaiting bank approval, or already active
+          None  — the provider could not be reached, so nothing is known
+
+        Each adapter answers in its own vocabulary — "created" is not the same
+        word at every provider, and an authorisation that is merely SLOW (eNACH
+        bank approval takes days) must answer False, not True.
+
+        READ-ONLY: never cancels or mutates anything at the provider.
+        """
+
+    @abc.abstractmethod
     def fetch_subscription_state(
         self, external_subscription_id: str
     ) -> "ProviderSubscriptionState | None":
