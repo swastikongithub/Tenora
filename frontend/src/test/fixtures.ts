@@ -118,6 +118,35 @@ export const PLAN_PRO: PlanRow = {
   interval: 'MONTHLY',
 }
 
+/** Tier-correct plans for the plan-change rules (BASIC < PRO, and two PRO
+ *  cadences). Codes match production: the rules read the code's prefix. */
+export const PLAN_BASIC: PlanRow = {
+  id: 'plan-basic',
+  name: 'Basic',
+  code: 'BASIC_MONTHLY',
+  price_cents: 50000,
+  currency: 'INR',
+  interval: 'MONTHLY',
+}
+
+export const PLAN_PRO_MONTHLY: PlanRow = {
+  id: 'plan-pro-monthly',
+  name: 'Pro',
+  code: 'PRO_MONTHLY',
+  price_cents: 200000,
+  currency: 'INR',
+  interval: 'MONTHLY',
+}
+
+export const PLAN_PRO_ANNUAL: PlanRow = {
+  id: 'plan-pro-annual',
+  name: 'Pro',
+  code: 'PRO_ANNUAL',
+  price_cents: 1000000,
+  currency: 'INR',
+  interval: 'ANNUAL',
+}
+
 export const PLAN_TEAM: PlanRow = {
   id: 'plan-team',
   name: 'Team',

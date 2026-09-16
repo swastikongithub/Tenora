@@ -28,6 +28,7 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import { Badge } from '../components'
 import { cn } from '../lib/cn'
 import { formatMoney } from '../lib/format'
+import type { PlanChangeVerdict } from './planChangeRules'
 import type { Plan } from './SubscriptionPage'
 
 const INTERVAL_LABEL: Record<Plan['interval'], string> = {
@@ -52,14 +53,22 @@ interface PlanGridProps {
   onSelect?: (plan: Plan) => void
   /** True while a create/change request is in flight. */
   busy?: boolean
+  /**
+   * What the billing rules say about moving to each plan, when the workspace
+   * already subscribes. Blocked plans render disabled with the reason; the
+   * server enforces the same rules regardless of what is shown here.
+   */
+  verdictFor?: (plan: Plan) => PlanChangeVerdict
 }
 
 function PlanCardBody({
   plan,
   isCurrent,
+  note,
 }: {
   plan: Plan
   isCurrent: boolean
+  note?: string
 }) {
   return (
     <>
@@ -76,6 +85,9 @@ function PlanCardBody({
       <span className="mt-1 block text-caption text-secondary">
         {INTERVAL_LABEL[plan.interval] ?? plan.interval}
       </span>
+      {note && (
+        <span className="mt-3 block text-caption text-secondary">{note}</span>
+      )}
     </>
   )
 }
@@ -85,6 +97,7 @@ export function PlanGrid({
   currentPlanId,
   onSelect,
   busy = false,
+  verdictFor,
 }: PlanGridProps) {
   const cardRefs = useRef<Array<HTMLButtonElement | null>>([])
   // Roving tabindex: the checked card is the tab stop, falling back to the
@@ -105,7 +118,11 @@ export function PlanGrid({
               key={plan.id}
               className={cn(CARD_BASE, isCurrent ? CARD_SELECTED : CARD_PLAIN)}
             >
-              <PlanCardBody plan={plan} isCurrent={isCurrent} />
+              <PlanCardBody
+                plan={plan}
+                isCurrent={isCurrent}
+                note={verdictFor?.(plan).note}
+              />
             </li>
           )
         })}
@@ -153,6 +170,11 @@ export function PlanGrid({
     >
       {plans.map((plan, i) => {
         const isCurrent = plan.id === currentPlanId
+        const verdict = verdictFor?.(plan)
+        // A blocked plan is a real dead end, so it is disabled rather than
+        // clickable-then-rejected. The current plan stays focusable (it is the
+        // checked radio) but selecting it starts nothing.
+        const blocked = verdict?.kind === 'blocked'
         return (
           <button
             key={plan.id}
@@ -163,18 +185,24 @@ export function PlanGrid({
             role="radio"
             aria-checked={isCurrent}
             tabIndex={i === focusIndex ? 0 : -1}
-            disabled={busy}
-            onClick={() => onSelect(plan)}
+            disabled={busy || blocked}
+            aria-disabled={blocked || undefined}
+            title={blocked ? verdict?.note : undefined}
+            onClick={() => {
+              if (blocked || isCurrent) return
+              onSelect(plan)
+            }}
             onFocus={() => setFocusIndex(i)}
             className={cn(
               CARD_BASE,
               CARD_FOCUS,
               isCurrent ? CARD_SELECTED : CARD_PLAIN,
-              !isCurrent && !busy && 'hover:bg-overlay',
+              !isCurrent && !busy && !blocked && 'hover:bg-overlay',
               busy && 'opacity-60',
+              blocked && 'cursor-not-allowed opacity-60',
             )}
           >
-            <PlanCardBody plan={plan} isCurrent={isCurrent} />
+            <PlanCardBody plan={plan} isCurrent={isCurrent} note={verdict?.note} />
           </button>
         )
       })}

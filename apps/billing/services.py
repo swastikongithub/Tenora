@@ -58,6 +58,84 @@ class IllegalStateTransition(Exception):
     pass
 
 
+class PlanChangeNotAllowed(Exception):
+    """
+    A plan change the billing rules refuse. Carries a stable `code` so the
+    frontend can render one explanation per reason instead of matching on
+    prose, and a message safe to show a customer.
+    """
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class PlanChangePolicy:
+    """
+    Which plan changes are allowed, and what a permitted one costs the caller.
+
+    The authority is here, in the domain — the two entry points (PATCH
+    /subscriptions/current/ and the checkout endpoint) both ask this, so a
+    client cannot reach a different answer by choosing a different endpoint.
+
+    Tier comes from the plan CODE's prefix (`BASIC_MONTHLY` -> BASIC,
+    `PRO_ANNUAL` -> PRO), which is how Tenora's codes are already built. It is
+    read rather than stored because adding a column would be a migration for
+    something the existing data already expresses — and an unrecognised prefix
+    is refused rather than guessed, so a new plan code must be classified here
+    deliberately before it can be switched to.
+    """
+
+    #: Entitlement tiers, low to high. A change UP is a paid upgrade; a change
+    #: DOWN is refused; a change WITHIN a tier is a billing-cycle change.
+    TIER_ORDER = {"BASIC": 1, "PRO": 2}
+
+    NO_OP = "no_op"
+    UPGRADE = "upgrade"
+
+    @staticmethod
+    def tier_of(plan):
+        return str(plan.code).split("_")[0].upper()
+
+    @staticmethod
+    def classify(current_plan, new_plan):
+        """
+        `NO_OP` (already on it) or `UPGRADE` (needs a paid checkout). Anything
+        else raises `PlanChangeNotAllowed`.
+        """
+        if current_plan.id == new_plan.id:
+            return PlanChangePolicy.NO_OP
+
+        order = PlanChangePolicy.TIER_ORDER
+        current_tier = PlanChangePolicy.tier_of(current_plan)
+        new_tier = PlanChangePolicy.tier_of(new_plan)
+        if current_tier not in order or new_tier not in order:
+            # Fail closed: an unclassified plan is never silently switched to.
+            raise PlanChangeNotAllowed(
+                "plan_change_not_supported",
+                "This plan change isn’t supported. Contact support to change your plan.",
+            )
+
+        if order[new_tier] > order[current_tier]:
+            return PlanChangePolicy.UPGRADE
+        if order[new_tier] < order[current_tier]:
+            raise PlanChangeNotAllowed(
+                "downgrade_not_supported",
+                "Downgrading isn’t supported yet. Cancel your subscription to stop "
+                "billing at the end of the current period.",
+            )
+        # Same tier, different plan: monthly <-> annual. Switching cadence
+        # mid-subscription needs proration semantics that have not been
+        # designed, and inventing a price difference here would be a guess
+        # about the customer's money.
+        raise PlanChangeNotAllowed(
+            "billing_cycle_change_not_supported",
+            "Changing billing cycle isn’t supported yet. Contact support to switch "
+            "between monthly and annual billing.",
+        )
+
+
 class SubscriptionAlreadyExists(Exception):
     """
     Raised when create_subscription hits the Tenant OneToOne
@@ -148,6 +226,29 @@ class SubscriptionService:
         ProrationService.record_for_plan_change(subscription, from_plan, new_plan)
         subscription.plan = new_plan
         subscription.save(update_fields=["plan", "updated_at"])
+        return subscription
+
+    @staticmethod
+    @transaction.atomic
+    def apply_upgrade(subscription, new_plan, external_subscription_id):
+        """
+        Move an existing subscription onto the plan whose mandate the provider
+        has just authorised, and adopt that provider subscription as the one we
+        bill against from now on.
+
+        Called ONLY from verified-webhook processing: an upgrade takes effect
+        when the new mandate activates, never when the customer clicks. Until
+        then the old subscription keeps running untouched, which is what makes
+        an abandoned or failed upgrade harmless.
+
+        Reuses `change_plan` for the swap (so its CANCELED guard and the
+        proration audit entry both still apply) and leaves the status move to
+        the caller's normal ACTIVE transition.
+        """
+        subscription = SubscriptionService.change_plan(subscription, new_plan)
+        if external_subscription_id and subscription.external_subscription_id != external_subscription_id:
+            subscription.external_subscription_id = external_subscription_id
+            subscription.save(update_fields=["external_subscription_id", "updated_at"])
         return subscription
 
     @staticmethod
@@ -620,6 +721,27 @@ class WebhookProcessingService:
                 subscription = Subscription.objects.select_related("plan").get(
                     tenant=checkout.tenant
                 )
+            # The tenant already subscribes and this activation belongs to a
+            # checkout for a DIFFERENT plan: the upgrade the customer paid for
+            # has just been authorised, so it takes effect now — and only now.
+            if subscription.plan_id != checkout.plan_id:
+                try:
+                    PlanChangePolicy.classify(subscription.plan, checkout.plan)
+                except PlanChangeNotAllowed as exc:
+                    # A checkout that should never have been created (or a plan
+                    # that changed meaning since). Activate nothing; the
+                    # subscription keeps the plan it is entitled to.
+                    logger.warning(
+                        "webhook %s: activation for %s would be a %s from %s — refused",
+                        event.external_event_id,
+                        checkout.plan.code,
+                        exc.code,
+                        subscription.plan.code,
+                    )
+                else:
+                    subscription = SubscriptionService.apply_upgrade(
+                        subscription, checkout.plan, event.external_subscription_id
+                    )
 
         if subscription.status not in (
             Subscription.Status.ACTIVE,

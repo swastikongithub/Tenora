@@ -22,6 +22,8 @@ from apps.billing.serializers import (
     SubscriptionUpdateSerializer,
 )
 from apps.billing.services import (
+    PlanChangeNotAllowed,
+    PlanChangePolicy,
     CheckoutPlanMismatch,
     CheckoutService,
     CheckoutSignatureInvalid,
@@ -126,16 +128,45 @@ class CurrentSubscriptionView(APIView):
                     {"plan_id": ["No active plan with this id."]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            try:
-                subscription = SubscriptionService.change_plan(subscription, plan)
-            except IllegalStateTransition as exc:
+            if subscription.status == Subscription.Status.CANCELED:
                 # Keyed to plan_id, the field the client actually sent, so the
                 # frontend reads one error key for every plan-change rejection
                 # (unknown plan, inactive plan, terminal subscription) instead
                 # of branching on which of them it hit.
                 return Response(
-                    {"plan_id": [str(exc)]}, status=status.HTTP_400_BAD_REQUEST
+                    {
+                        "plan_id": [
+                            f"Cannot change the plan of a {subscription.status} "
+                            "subscription."
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
                 )
+            # The billing rules decide whether this change is possible at all,
+            # and they answer the same whichever endpoint a client asks
+            # through. A paid upgrade is NOT applied here — it becomes real
+            # only when the new mandate's verified webhook activates it, so
+            # this endpoint can no longer move a workspace onto a plan it has
+            # not paid for.
+            try:
+                decision = PlanChangePolicy.classify(subscription.plan, plan)
+            except PlanChangeNotAllowed as exc:
+                return Response(
+                    {"plan_id": [exc.message], "code": exc.code, "detail": exc.message},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if decision == PlanChangePolicy.UPGRADE:
+                message = "Upgrading requires payment. Start checkout for this plan."
+                return Response(
+                    {
+                        "plan_id": [message],
+                        "code": "upgrade_requires_checkout",
+                        "detail": message,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            # NO_OP: already on this plan. Nothing is created, nothing changes,
+            # and the unchanged subscription is echoed back.
         else:
             try:
                 subscription = SubscriptionService.transition_status(
@@ -167,14 +198,6 @@ class StartCheckoutView(APIView):
         serializer = CheckoutStartSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        # Already have a real subscription? That's a plan change (an
-        # update-subscription operation), not a new checkout — out of D2 scope.
-        if Subscription.objects.for_tenant(request.tenant).exists():
-            return Response(
-                {"detail": "This tenant already has a subscription."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
         try:
             plan = Plan.objects.get(
                 id=serializer.validated_data["plan_id"], is_active=True
@@ -184,6 +207,41 @@ class StartCheckoutView(APIView):
                 {"plan_id": ["No active plan with this id."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # An existing subscription no longer blocks checkout outright: a paid
+        # UPGRADE is exactly a new mandate raised while the current plan keeps
+        # running. Everything else the rules refuse is refused here too, with
+        # the same codes the PATCH endpoint returns — a client cannot reach a
+        # different answer by picking a different endpoint.
+        current = (
+            Subscription.objects.for_tenant(request.tenant)
+            .select_related("plan")
+            .first()
+        )
+        if current is not None:
+            if current.status == Subscription.Status.CANCELED:
+                return Response(
+                    {
+                        "detail": "This workspace's subscription was canceled.",
+                        "code": "subscription_canceled",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            try:
+                decision = PlanChangePolicy.classify(current.plan, plan)
+            except PlanChangeNotAllowed as exc:
+                return Response(
+                    {"detail": exc.message, "code": exc.code},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            if decision == PlanChangePolicy.NO_OP:
+                return Response(
+                    {
+                        "detail": "This workspace is already on this plan.",
+                        "code": "already_on_plan",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
 
         try:
             checkout = CheckoutService.create_checkout(

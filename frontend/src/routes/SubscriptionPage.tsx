@@ -49,6 +49,10 @@ import { useTenant } from '../lib/tenant'
 import { CancelSubscriptionModal } from './CancelSubscriptionModal'
 import { ChangePlanConfirmModal } from './ChangePlanConfirmModal'
 import { openCashfreeSubscriptionCheckout } from './cashfreeSubscriptionCheckout'
+import {
+  classifyPlanChange,
+  type PlanChangeVerdict,
+} from './planChangeRules'
 import { PlanGrid } from './PlanGrid'
 import {
   useRazorpayCheckout,
@@ -208,22 +212,12 @@ export function SubscriptionPage() {
   // LEGAL_TRANSITIONS guard on the backend are the real boundaries.
   const canCancel = Boolean(isOwner && currentTenantId && subscription) && !canceled
 
-  async function changePlan(plan: Plan) {
-    setSubmitting(true)
-    setActionError(null)
-    try {
-      // Body is `plan_id` only — never tenant_id (the api-client's
-      // assertNoTenantInBody guard throws on it), and never status.
-      await apiClient.patch<Subscription>('/subscriptions/current/', {
-        plan_id: plan.id,
-      })
-      setSubmitting(false)
-      setTarget(null)
-      void queryClient.invalidateQueries({ queryKey: subscriptionKey })
-    } catch (cause) {
-      setSubmitting(false)
-      setActionError(messageFor(cause))
-    }
+  async function upgradeTo(plan: Plan) {
+    // An upgrade is a purchase, not an edit: it goes through checkout, and the
+    // current plan keeps running until the provider's verified webhook
+    // activates the new one. Nothing here claims the plan has changed.
+    setTarget(null)
+    await startCheckout(plan)
   }
 
   async function startCheckout(plan: Plan) {
@@ -300,16 +294,29 @@ export function SubscriptionPage() {
     }
   }
 
+  function verdictFor(plan: Plan): PlanChangeVerdict {
+    // Nothing subscribed yet: every plan is simply available to buy, and the
+    // rules about CHANGING a plan do not apply.
+    if (!subscription) return { kind: 'upgrade', note: '' }
+    return classifyPlanChange(subscription.plan.code, plan.code)
+  }
+
   function handleSelect(plan: Plan) {
     setActionError(null)
     setCheckoutState(null)
     if (noSubscription) {
-      // No local row is created here — this opens Razorpay Checkout. The real
-      // subscription is created later, by D3's webhook (stage-d2-spec.md §1).
+      // No local row is created here — this opens the provider's checkout. The
+      // real subscription is created later, by the webhook (stage-d2-spec.md §1).
       void startCheckout(plan)
       return
     }
-    if (subscription && plan.id === subscription.plan.id) return
+    if (!subscription) return
+    // Already subscribed: the rules decide. Selecting the current plan does
+    // nothing, a blocked change never opens anything, and an upgrade is
+    // confirmed and then PAID FOR — the plan itself only moves once the
+    // provider's webhook activates it.
+    const verdict = verdictFor(plan)
+    if (verdict.kind !== 'upgrade') return
     setTarget(plan)
   }
 
@@ -504,6 +511,7 @@ export function SubscriptionPage() {
                   currentPlanId={subscription?.plan.id}
                   onSelect={canManage ? handleSelect : undefined}
                   busy={submitting}
+                  verdictFor={verdictFor}
                 />
               )}
             </div>
@@ -517,7 +525,7 @@ export function SubscriptionPage() {
         current={subscription?.plan ?? null}
         submitting={submitting}
         error={actionError}
-        onConfirm={() => target && void changePlan(target)}
+        onConfirm={() => target && void upgradeTo(target)}
         onClose={() => {
           setTarget(null)
           setActionError(null)

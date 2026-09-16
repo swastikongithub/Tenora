@@ -1,7 +1,12 @@
 /**
- * Plan-change confirmation (§C.4 Page 4: "plan change opens a confirmation modal
+ * Upgrade confirmation (§C.4 Page 4: "plan change opens a confirmation modal
  * stating the current plan, the target plan, and that billing-period effects
  * apply").
+ *
+ * The only plan change a customer can now make is a paid UPGRADE — downgrades
+ * and billing-cycle switches are refused before this opens — so the copy says
+ * plainly that money is involved and that nothing changes until the payment
+ * goes through. "Change plan" read like a settings edit for what is a purchase.
  *
  * No form fields — it confirms a decision already made by clicking a card — so
  * unlike `AddMemberModal` there is no `<form>`/form-id wiring; the footer button
@@ -40,14 +45,14 @@ export function ChangePlanConfirmModal({
     <Modal
       open={target != null}
       onClose={onClose}
-      title="Change plan"
+      title="Upgrade plan"
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={submitting}>
             Cancel
           </Button>
           <Button onClick={onConfirm} loading={submitting}>
-            Change plan
+            Continue to payment
           </Button>
         </>
       }
@@ -84,7 +89,9 @@ export function ChangePlanConfirmModal({
               )}
             </p>
             <p className="text-body text-secondary">
-              The change applies to the current billing period.
+              Payment is required to upgrade. You’ll be taken to the payment
+              provider to authorise it, and your current plan keeps running
+              until the payment is confirmed.
             </p>
           </>
         )}

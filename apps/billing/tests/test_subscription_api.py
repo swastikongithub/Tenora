@@ -170,13 +170,18 @@ class SubscriptionCheckoutEndpointTests(SubscriptionAPITestBase):
             SubscriptionCheckout.objects.filter(tenant=self.tenant).exists()
         )
 
-    def test_checkout_when_a_subscription_already_exists_returns_400(self):
+    def test_checkout_for_a_plan_change_the_rules_refuse_is_rejected(self):
+        # A subscription no longer blocks checkout outright — a paid UPGRADE is
+        # allowed — but an unclassified change is still refused, and creates no
+        # checkout.
         self._create_subscription(plan=self.plan)
         self._auth(self.owner, self.tenant.id)
 
         resp = self.client.post(self.URL, {"plan_id": str(self.other_plan.id)})
 
-        self.assertEqual(resp.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(resp.status_code, status.HTTP_409_CONFLICT)
+        self.assertEqual(resp.data["code"], "plan_change_not_supported")
+        self.assertFalse(SubscriptionCheckout.objects.exists())
 
     def test_unknown_plan_id_returns_400(self):
         self._auth(self.owner, self.tenant.id)
@@ -209,16 +214,30 @@ class SubscriptionCheckoutEndpointTests(SubscriptionAPITestBase):
 
 
 class SubscriptionUpdateTests(SubscriptionAPITestBase):
-    def test_owner_changes_plan(self):
+    def test_owner_cannot_swap_plans_through_patch(self):
+        # PATCH used to move a workspace onto any plan for free. Plan changes
+        # are billing decisions now: an upgrade is paid for through checkout
+        # and lands via the verified webhook, and anything the rules do not
+        # classify is refused outright.
         self._create_subscription(plan=self.plan)
         self._auth(self.owner, self.tenant.id)
 
         resp = self.client.patch(URL, {"plan_id": str(self.other_plan.id)})
 
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data["plan"]["code"], "TEAM")
+        self.assertEqual(resp.status_code, status.HTTP_409_CONFLICT)
+        self.assertIn("code", resp.data)
         sub = Subscription.objects.get(tenant=self.tenant)
-        self.assertEqual(sub.plan_id, self.other_plan.id)
+        self.assertEqual(sub.plan_id, self.plan.id)  # unchanged
+
+    def test_patching_the_current_plan_is_a_no_op(self):
+        self._create_subscription(plan=self.plan)
+        self._auth(self.owner, self.tenant.id)
+
+        resp = self.client.patch(URL, {"plan_id": str(self.plan.id)})
+
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(resp.data["plan"]["code"], "PRO")
+        self.assertEqual(SubscriptionCheckout.objects.count(), 0)
 
     def test_owner_makes_legal_status_transition(self):
         self._create_subscription()  # starts TRIALING

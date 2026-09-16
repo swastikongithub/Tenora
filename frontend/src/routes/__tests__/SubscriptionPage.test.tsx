@@ -13,7 +13,9 @@ import {
   checkoutStartHandler,
   currentSubscriptionByTenantHandler,
   currentSubscriptionHandler,
+  PLAN_BASIC,
   PLAN_PRO,
+  PLAN_PRO_MONTHLY,
   PLAN_TEAM,
   plansHandler,
   subscriptionFor,
@@ -362,62 +364,82 @@ describe('SubscriptionPage — plan grid', () => {
 
 describe('SubscriptionPage — OWNER change plan', () => {
 
-  it('opens a confirmation modal naming current and target plan before changing', async () => {
-    let current = subscriptionFor(PLAN_PRO, 'ACTIVE')
+  it('an upgrade confirms, then goes to checkout — never a free plan swap', async () => {
+    const current = subscriptionFor(PLAN_BASIC, 'ACTIVE')
+    let checkoutBody: Record<string, unknown> | null = null
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_A]),
       http.get(apiUrl('/subscriptions/current/'), () =>
         HttpResponse.json(current),
       ),
-      plansHandler(),
-      http.patch(apiUrl('/subscriptions/current/'), async ({ request }) => {
-        const body = (await request.json()) as Record<string, unknown>
-        expect(body).toEqual({ plan_id: PLAN_TEAM.id })
-        current = subscriptionFor(PLAN_TEAM, 'ACTIVE')
-        return HttpResponse.json(current)
+      plansHandler([PLAN_BASIC, PLAN_PRO_MONTHLY]),
+      http.patch(apiUrl('/subscriptions/current/'), () => {
+        throw new Error('a plan change must never PATCH the subscription')
+      }),
+      http.post(apiUrl('/subscriptions/current/checkout/'), async ({ request }) => {
+        checkoutBody = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({
+          provider: 'cashfree',
+          subscription_id: 'tnrsub_up',
+          session_token: 'sess_up',
+          checkout_mode: 'sandbox',
+          razorpay_subscription_id: 'tnrsub_up',
+          razorpay_key_id: '',
+          plan: PLAN_PRO_MONTHLY,
+          status: 'CREATED',
+        })
       }),
     )
     renderSubscription(TENANT_A)
 
     await findPanel()
-    await userEvent.click(screen.getByRole('radio', { name: /Team/ }))
+    await userEvent.click(screen.getByRole('radio', { name: /Pro/ }))
 
-    const dialog = await screen.findByRole('dialog', { name: 'Change plan' })
+    const dialog = await screen.findByRole('dialog', { name: 'Upgrade plan' })
+    expect(within(dialog).getByText(/Basic/)).toBeInTheDocument()
     expect(within(dialog).getByText(/Pro/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/Team/)).toBeInTheDocument()
 
     await userEvent.click(
-      within(dialog).getByRole('button', { name: 'Change plan' }),
+      within(dialog).getByRole('button', { name: 'Continue to payment' }),
     )
+
+    await waitFor(() => expect(checkoutBody).toEqual({ plan_id: PLAN_PRO_MONTHLY.id }))
 
     await waitFor(() =>
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
     )
+    // The workspace is still on Basic: paying for the upgrade is what moves it,
+    // and only once the provider's webhook activates the new mandate.
     const panel = await findPanel()
-    expect(within(panel).getByText('TEAM')).toBeInTheDocument()
+    expect(within(panel).getByText('BASIC_MONTHLY')).toBeInTheDocument()
   })
 
   it('dismissing the confirmation modal sends no request', async () => {
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_A]),
-      currentSubscriptionHandler(subscriptionFor(PLAN_PRO)),
-      plansHandler(),
+      currentSubscriptionHandler(subscriptionFor(PLAN_BASIC, 'ACTIVE')),
+      plansHandler([PLAN_BASIC, PLAN_PRO_MONTHLY]),
       http.patch(apiUrl('/subscriptions/current/'), () => {
-        throw new Error('PATCH must not be called when the modal is dismissed')
+        throw new Error('dismissing must send no request')
+      }),
+      http.post(apiUrl('/subscriptions/current/checkout/'), () => {
+        throw new Error('dismissing must send no request')
       }),
     )
     renderSubscription(TENANT_A)
 
     await findPanel()
-    await userEvent.click(screen.getByRole('radio', { name: /Team/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Change plan' })
+    await userEvent.click(screen.getByRole('radio', { name: /Pro/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Upgrade plan' })
     await userEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument(),
+    )
     const panel = await findPanel()
-    expect(within(panel).getByText('PRO')).toBeInTheDocument()
+    expect(within(panel).getByText('BASIC_MONTHLY')).toBeInTheDocument()
   })
 
   it('re-selecting the current plan is a no-op', async () => {
@@ -788,52 +810,42 @@ describe('SubscriptionPage — error surfaces', () => {
     ).toBeInTheDocument()
   })
 
-  it('§0: 400 on a CANCELED subscription’s plan change renders the field message inline', async () => {
-    // Exercises the backend §0 guard's exact error shape end-to-end, even
-    // though the page itself never offers this action once CANCELED — a race
-    // or a stale render could still reach it.
+  it('a refused upgrade surfaces the backend’s own explanation', async () => {
+    // The page never PATCHes a plan change now, so the error that matters is
+    // the checkout endpoint refusing one — shown verbatim, not reinterpreted.
     server.use(
       ...authHandlers(),
       tenantsMeHandler([TENANT_A]),
-      currentSubscriptionHandler(subscriptionFor(PLAN_PRO, 'ACTIVE')),
-      plansHandler(),
-      http.patch(apiUrl('/subscriptions/current/'), () =>
+      currentSubscriptionHandler(subscriptionFor(PLAN_BASIC, 'ACTIVE')),
+      plansHandler([PLAN_BASIC, PLAN_PRO_MONTHLY]),
+      http.post(apiUrl('/subscriptions/current/checkout/'), () =>
         HttpResponse.json(
           {
-            plan_id: [
-              'Cannot change the plan of a CANCELED subscription.',
-            ],
+            detail: 'This workspace is already on this plan.',
+            code: 'already_on_plan',
           },
-          { status: 400 },
+          { status: 409 },
         ),
       ),
     )
     renderSubscription(TENANT_A)
 
     await findPanel()
-    await userEvent.click(screen.getByRole('radio', { name: /Team/ }))
-    const dialog = await screen.findByRole('dialog', { name: 'Change plan' })
+    await userEvent.click(screen.getByRole('radio', { name: /Pro/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Upgrade plan' })
     await userEvent.click(
-      within(dialog).getByRole('button', { name: 'Change plan' }),
+      within(dialog).getByRole('button', { name: 'Continue to payment' }),
     )
 
     expect(
-      await within(dialog).findByText(
-        'Cannot change the plan of a CANCELED subscription.',
-      ),
+      await screen.findByText('This workspace is already on this plan.'),
     ).toBeInTheDocument()
-    // The modal stays open with the error attached, per the page's contract.
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    const panel = await findPanel()
+    expect(within(panel).getByText('BASIC_MONTHLY')).toBeInTheDocument()
   })
-})
-
-describe('SubscriptionPage — tenant isolation (mixed global + tenant-scoped queries)', () => {
-  // Both workspaces are OWNED here: since property billing a resident never
-  // reaches this page, and the invariant under test is cache isolation across
-  // a switch, not the role of the second workspace.
-  const TENANT_B_OWNER = { ...TENANT_B, role: 'OWNER' as const }
 
   it('switching tenant refetches the subscription but never the global plan list', async () => {
+    const TENANT_B_OWNER = { ...TENANT_B, role: 'OWNER' as const }
     let plansCalls = 0
     server.use(
       ...authHandlers(),

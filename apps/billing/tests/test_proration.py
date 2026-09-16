@@ -230,20 +230,23 @@ class ChangePlanWiringTests(APITestCase):
         self.assertEqual(record.to_plan_id, self.team.id)
         self.assertGreater(record.amount_cents, 0)  # upgrade
 
-    def test_patch_endpoint_records_a_proration(self):
-        resp = self.client.patch(self.URL, {"plan_id": str(self.team.id)})
+    def test_the_upgrade_activation_path_records_a_proration(self):
+        # The plan swap moved: PATCH no longer changes plans (an upgrade is
+        # paid for through checkout and lands via the verified webhook), so the
+        # proration wiring is exercised where the swap now happens.
+        SubscriptionService.apply_upgrade(self.sub, self.team, "sub_NEW")
 
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
-        self.assertEqual(resp.data["plan"]["code"], "TEAM")
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.plan_id, self.team.id)
+        self.assertEqual(self.sub.external_subscription_id, "sub_NEW")
         self.assertEqual(ProrationRecord.objects.count(), 1)
 
     def test_calculation_failure_does_not_block_the_plan_change(self):
         with mock.patch.object(
             ProrationService, "calculate", side_effect=RuntimeError("boom")
         ):
-            resp = self.client.patch(self.URL, {"plan_id": str(self.team.id)})
+            SubscriptionService.apply_upgrade(self.sub, self.team, "sub_NEW")
 
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.sub.refresh_from_db()
         self.assertEqual(self.sub.plan_id, self.team.id)
         self.assertEqual(ProrationRecord.objects.count(), 0)
@@ -260,9 +263,8 @@ class ChangePlanWiringTests(APITestCase):
             fraction_remaining=Fraction(1),
         )
         with mock.patch.object(ProrationService, "calculate", return_value=bad):
-            resp = self.client.patch(self.URL, {"plan_id": str(self.team.id)})
+            SubscriptionService.apply_upgrade(self.sub, self.team, "sub_NEW")
 
-        self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.sub.refresh_from_db()
         self.assertEqual(self.sub.plan_id, self.team.id)
         self.assertEqual(ProrationRecord.objects.count(), 0)

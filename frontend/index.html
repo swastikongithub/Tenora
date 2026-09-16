@@ -4,6 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
+    <!-- Browser-tab icon: Tenora's canonical mark (the flat accent square from
+         components/layout/Wordmark.tsx), not a second identity. SVG first for
+         crisp scaling; the 32px PNG is the fallback for browsers that ignore
+         SVG icons, and apple-touch-icon carries the same mark on a solid tile
+         because iOS composites away transparency. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
     <title>Tenora — Property Management &amp; Billing</title>
     <meta
       name="description"

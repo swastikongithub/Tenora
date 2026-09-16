@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Tenora">
+  <!-- Tenora's canonical mark: the flat solid accent square used by
+       src/components/layout/Wordmark.tsx (size-2 bg-accent-600). No container,
+       no rounding, no second identity — the same square, sized to read at
+       16px in a browser tab. Accent is theme.css's --color-accent-600. -->
+  <rect x="7" y="7" width="18" height="18" fill="#7c5cff"/>
+</svg>
