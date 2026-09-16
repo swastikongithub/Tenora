@@ -53,6 +53,9 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 20
 
+#: Cashfree's limit on plan_name (1-40 characters).
+PLAN_NAME_MAX = 40
+
 # Tenora's Plan.interval -> Cashfree's PERIODIC plan interval.
 _INTERVAL = {
     "MONTHLY": ("MONTH", 1),
@@ -226,12 +229,21 @@ class CashfreeSubscriptionGatewayAdapter(PaymentGatewayAdapter):
         """
         interval_type, intervals = _INTERVAL.get(plan.interval, ("MONTH", 1))
         plan_id = f"tenora_{plan.code.lower()}"
+        amount = cents_to_amount(plan.price_cents)
         status_code, body = self._request("POST", "/plans", {
             "plan_id": plan_id,
-            "plan_name": plan.name[:100],
+            # Cashfree caps plan_name at 40 characters.
+            "plan_name": plan.name[:PLAN_NAME_MAX],
             "plan_type": "PERIODIC",
             "plan_currency": plan.currency or "INR",
-            "plan_amount": cents_to_amount(plan.price_cents),
+            # The recurring charge per interval. NOT `plan_amount` — that field
+            # belongs to the subscription payload; the plans API rejects it.
+            "plan_recurring_amount": amount,
+            # Required. The ceiling Cashfree will ever debit under this plan;
+            # the mandate is authorised up to it. Equal to the recurring amount:
+            # a Tenora plan charges exactly its price, so a higher ceiling would
+            # authorise more than the plan can ever legitimately take.
+            "plan_max_amount": amount,
             "plan_interval_type": interval_type,
             "plan_intervals": intervals,
         })

@@ -78,7 +78,8 @@ class CreatePlanTests(TestCase):
         self.assertEqual(headers["x-api-version"], "2026-01-01")
         self.assertEqual(headers["x-client-id"], CLIENT_ID)
         self.assertEqual(body["plan_type"], "PERIODIC")
-        self.assertEqual(body["plan_amount"], 2000.0)
+        self.assertEqual(body["plan_recurring_amount"], 2000.0)
+        self.assertEqual(body["plan_max_amount"], 2000.0)
         self.assertEqual((body["plan_interval_type"], body["plan_intervals"]), ("MONTH", 1))
 
     def test_annual_plans_use_a_yearly_interval(self):
@@ -86,6 +87,83 @@ class CreatePlanTests(TestCase):
         gw.create_plan(plan(code="PRO_ANNUAL", interval="ANNUAL"))
         body = json.loads(session.request.call_args.kwargs["data"])
         self.assertEqual((body["plan_interval_type"], body["plan_intervals"]), ("YEAR", 1))
+
+    def test_the_monthly_payload_matches_the_create_plan_contract(self):
+        # Every field Cashfree's Create Plan API defines for a PERIODIC plan,
+        # by its exact name. `plan_amount` (the SUBSCRIPTION payload's field)
+        # was sent here once and produced a 400 from the provider.
+        gw, session = adapter([FakeResponse(200, {"plan_id": "tenora_basic_monthly"})])
+        gw.create_plan(plan(code="BASIC_MONTHLY", price_cents=50_000))
+        body = json.loads(session.request.call_args.kwargs["data"])
+        self.assertEqual(body, {
+            "plan_id": "tenora_basic_monthly",
+            "plan_name": "Pro",
+            "plan_type": "PERIODIC",
+            "plan_currency": "INR",
+            "plan_recurring_amount": 500.0,
+            "plan_max_amount": 500.0,
+            "plan_interval_type": "MONTH",
+            "plan_intervals": 1,
+        })
+        self.assertNotIn("plan_amount", body)
+
+    def test_the_annual_payload_matches_the_create_plan_contract(self):
+        gw, session = adapter([FakeResponse(200, {"plan_id": "tenora_pro_annual"})])
+        gw.create_plan(plan(code="PRO_ANNUAL", interval="ANNUAL", price_cents=1_000_000))
+        body = json.loads(session.request.call_args.kwargs["data"])
+        self.assertEqual(body, {
+            "plan_id": "tenora_pro_annual",
+            "plan_name": "Pro",
+            "plan_type": "PERIODIC",
+            "plan_currency": "INR",
+            "plan_recurring_amount": 10000.0,
+            "plan_max_amount": 10000.0,
+            "plan_interval_type": "YEAR",
+            "plan_intervals": 1,
+        })
+
+    def test_the_required_max_amount_is_sent_and_never_exceeds_the_price(self):
+        # plan_max_amount is what the mandate authorises Cashfree to debit. A
+        # ceiling above the plan's price would let more be taken than the plan
+        # can legitimately charge.
+        for price in (50_000, 200_000, 1_000_000):
+            with self.subTest(price=price):
+                gw, session = adapter([FakeResponse(200, {"plan_id": "p"})])
+                gw.create_plan(plan(price_cents=price))
+                body = json.loads(session.request.call_args.kwargs["data"])
+                self.assertIn("plan_max_amount", body)
+                self.assertEqual(body["plan_max_amount"], body["plan_recurring_amount"])
+                self.assertEqual(body["plan_max_amount"], price / 100)
+
+    def test_the_plan_name_is_capped_at_the_providers_forty_characters(self):
+        gw, session = adapter([FakeResponse(200, {"plan_id": "p"})])
+        long_name = "Tenora Professional Plan For Very Large Property Portfolios"
+        gw.create_plan(SimpleNamespace(
+            code="PRO", name=long_name, interval="MONTHLY", price_cents=200_000,
+            currency="INR", external_plan_id="tenora_pro",
+        ))
+        body = json.loads(session.request.call_args.kwargs["data"])
+        self.assertEqual(len(body["plan_name"]), 40)
+        self.assertEqual(body["plan_name"], long_name[:40])
+
+    def test_the_generated_plan_id_satisfies_the_providers_constraints(self):
+        # 1-40 characters, alphanumerics plus dot, hyphen and underscore.
+        import re
+        for code in ("BASIC_MONTHLY", "PRO_MONTHLY", "PRO_ANNUAL"):
+            with self.subTest(code=code):
+                gw, session = adapter([FakeResponse(200, {"plan_id": "p"})])
+                gw.create_plan(plan(code=code))
+                plan_id = json.loads(session.request.call_args.kwargs["data"])["plan_id"]
+                self.assertRegex(plan_id, r"^[A-Za-z0-9._-]{1,40}$")
+                self.assertEqual(plan_id, f"tenora_{code.lower()}")
+
+    def test_interval_mapping_is_exact(self):
+        for interval, expected in (("MONTHLY", ("MONTH", 1)), ("ANNUAL", ("YEAR", 1))):
+            with self.subTest(interval=interval):
+                gw, session = adapter([FakeResponse(200, {"plan_id": "p"})])
+                gw.create_plan(plan(interval=interval))
+                body = json.loads(session.request.call_args.kwargs["data"])
+                self.assertEqual((body["plan_interval_type"], body["plan_intervals"]), expected)
 
     def test_an_already_mirrored_plan_is_not_an_error(self):
         # Cashfree's docs don't pin the status code for a duplicate plan id, so
