@@ -17,11 +17,14 @@ from apps.billing.gateway.base import (
     EventType,
     NormalizedEvent,
     PaymentGatewayAdapter,
+    ProviderCheckout,
     ProviderSubscriptionState,
     ProviderSubscriptionStatus,
     ProviderUnavailable,
+    SubscriberContactRequired,
     WebhookParseError,
 )
+from apps.billing.gateway.cashfree import CashfreeSubscriptionGatewayAdapter
 from apps.billing.gateway.mock import MockGatewayAdapter
 from apps.billing.gateway.razorpay import RazorpayGatewayAdapter
 
@@ -29,10 +32,13 @@ __all__ = [
     "EventType",
     "NormalizedEvent",
     "PaymentGatewayAdapter",
+    "ProviderCheckout",
     "ProviderSubscriptionState",
     "ProviderSubscriptionStatus",
     "ProviderUnavailable",
+    "SubscriberContactRequired",
     "WebhookParseError",
+    "CashfreeSubscriptionGatewayAdapter",
     "MockGatewayAdapter",
     "RazorpayGatewayAdapter",
     "get_gateway",
@@ -40,6 +46,7 @@ __all__ = [
 
 _ADAPTERS = {
     "razorpay": RazorpayGatewayAdapter,
+    "cashfree": CashfreeSubscriptionGatewayAdapter,
     "mock": MockGatewayAdapter,
 }
 

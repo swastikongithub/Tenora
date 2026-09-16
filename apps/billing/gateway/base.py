@@ -76,6 +76,57 @@ class WebhookParseError(Exception):
     """The webhook body could not be parsed (not JSON, not an object, …)."""
 
 
+class SubscriberContactRequired(Exception):
+    """
+    The provider needs a contact detail about the subscriber that Tenora does
+    not have yet (Cashfree requires a phone number to raise a mandate). A
+    fixable, user-facing condition — NOT an outage — so it is its own type
+    rather than a `ProviderUnavailable`.
+    """
+
+
+def parse_provider_datetime(value):
+    """
+    An ISO-8601 timestamp from a provider payload as an aware UTC datetime, or
+    None for anything unparseable. Providers vary in offset format and in which
+    fields they populate at all, and a malformed timestamp must never fail a
+    webhook that is otherwise verified and processable.
+    """
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+@dataclass(frozen=True)
+class ProviderCheckout:
+    """
+    What the browser needs to open the provider's hosted checkout, and nothing
+    more — never a secret.
+
+    Providers differ in what that is: Razorpay opens with a PUBLIC key id plus
+    the subscription id; Cashfree opens with a one-shot subscription session
+    token. Both shapes are carried here so `CheckoutService` and the checkout
+    endpoint stay provider-neutral, with the unused field left empty rather
+    than the domain branching on the provider's name.
+    """
+
+    provider: str
+    external_subscription_id: str
+    #: Cashfree's `subscription_session_id`. Empty for Razorpay.
+    session_token: str = ""
+    #: Razorpay's publishable key id. Empty for Cashfree.
+    public_key: str = ""
+    #: "sandbox" | "production" — which environment the browser SDK must use.
+    mode: str = "sandbox"
+
+
 class ProviderSubscriptionStatus(enum.StrEnum):
     """
     The project's own vocabulary for a subscription's status AS THE PROVIDER
@@ -149,10 +200,16 @@ class PaymentGatewayAdapter(abc.ABC):
         """Create the provider-side plan for `plan`; return its external id."""
 
     @abc.abstractmethod
-    def create_subscription(self, tenant, plan) -> str:
+    def create_subscription(self, tenant, plan) -> "ProviderCheckout":
         """
-        Create the provider-side subscription for `tenant` on `plan`; return its
-        external id. `plan` must already have an `external_plan_id`.
+        Create the provider-side subscription for `tenant` on `plan` and return
+        everything the browser needs to open that provider's checkout for it.
+        `plan` must already have an `external_plan_id`.
+
+        Returns a `ProviderCheckout` rather than a bare id because providers
+        differ in what the browser needs — a publishable key (Razorpay) or a
+        session token (Cashfree). Raises `SubscriberContactRequired` when the
+        provider needs a subscriber detail Tenora doesn't hold yet.
         """
 
     @abc.abstractmethod
@@ -179,6 +236,22 @@ class PaymentGatewayAdapter(abc.ABC):
         """
         Whether a checkout success callback's signature is authentic. A
         different construction and key from the webhook signature. Never raises.
+
+        Only meaningful for providers that sign the browser's success callback.
+        `confirm_checkout_report` is the general form and what the domain calls.
+        """
+
+    @abc.abstractmethod
+    def confirm_checkout_report(self, external_subscription_id: str, report: dict) -> bool:
+        """
+        Whether the browser's "checkout succeeded" report for
+        `external_subscription_id` can be believed — for UI feedback and audit
+        ONLY. A true answer never activates anything: a local `Subscription` is
+        created only by processing a verified webhook, whatever this returns.
+
+        How it is established is the provider's business: Razorpay verifies the
+        signature its checkout returns; Cashfree, which signs no such callback,
+        ignores `report` and re-reads the mandate from its API. Never raises.
         """
 
     @abc.abstractmethod

@@ -6,7 +6,12 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.billing.gateway import WebhookParseError, get_gateway
+from apps.billing.gateway import (
+    ProviderUnavailable,
+    SubscriberContactRequired,
+    WebhookParseError,
+    get_gateway,
+)
 from apps.billing.models import Plan, Subscription, SubscriptionCheckout
 from apps.billing.serializers import (
     CheckoutConfirmSerializer,
@@ -197,9 +202,35 @@ class StartCheckoutView(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except SubscriberContactRequired as exc:
+            # Fixable by the owner (e.g. Cashfree needs a phone number for the
+            # mandate) — not an outage, so a distinct, actionable answer.
+            return Response(
+                {"detail": str(exc), "code": "subscriber_contact_required"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except ProviderUnavailable:
+            return Response(
+                {
+                    "detail": "The payment provider is unavailable right now. "
+                    "Please try again in a moment.",
+                    "code": "provider_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         body = SubscriptionCheckoutSerializer(checkout).data
-        body["razorpay_key_id"] = settings.RAZORPAY_KEY_ID  # public; never the secret
+        # Publishable identifiers only — never a secret, for either provider.
+        body["razorpay_key_id"] = settings.RAZORPAY_KEY_ID
+        body["checkout_mode"] = (
+            "production"
+            if (
+                settings.CASHFREE_SUBSCRIPTION_ENVIRONMENT == "production"
+                if checkout.provider == "cashfree"
+                else not settings.RAZORPAY_KEY_ID.startswith("rzp_test")
+            )
+            else "sandbox"
+        )
         return Response(body, status=status.HTTP_200_OK)
 
 
@@ -225,9 +256,10 @@ class ConfirmCheckoutView(APIView):
         try:
             CheckoutService.confirm_checkout(
                 tenant=request.tenant,
-                payment_id=data["razorpay_payment_id"],
-                subscription_id=data["razorpay_subscription_id"],
-                signature=data["razorpay_signature"],
+                subscription_id=(
+                    data.get("subscription_id") or data.get("razorpay_subscription_id")
+                ),
+                report=data,
             )
         except SubscriptionCheckout.DoesNotExist:
             return Response(
@@ -245,10 +277,16 @@ class ConfirmCheckoutView(APIView):
         return Response({"status": "processing"}, status=status.HTTP_200_OK)
 
 
-class RazorpayWebhookView(APIView):
+class SubscriptionWebhookView(APIView):
     """
-    POST /api/webhooks/razorpay/ — receive, verify, normalize, and deduplicate
-    payment-gateway webhook events (stage-d1-spec.md §4.4).
+    POST /api/webhooks/razorpay/ and /api/webhooks/cashfree/subscriptions/ —
+    receive, verify, normalize, and deduplicate SUBSCRIPTION webhook events
+    (stage-d1-spec.md §4.4).
+
+    One view, one route per provider: the route says which provider is expected
+    to call, while everything provider-specific (signature scheme, event names)
+    stays in the adapter `PAYMENT_GATEWAY` selects. A delivery to the route of
+    a provider that is not the configured one simply fails its signature check.
 
     Unauthenticated: the gateway calls this directly, there is no user session.
     The signature check (via the active adapter) IS the authentication — it is
@@ -312,3 +350,8 @@ class RazorpayWebhookView(APIView):
             )
 
         return Response(status=status.HTTP_200_OK)
+
+
+#: The route registered in D1 kept its name; the view outgrew it once a second
+#: provider arrived.
+RazorpayWebhookView = SubscriptionWebhookView

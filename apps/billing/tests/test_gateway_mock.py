@@ -29,9 +29,9 @@ class MockGatewayAdapterTests(SimpleTestCase):
     def test_create_subscription_is_deterministic_per_tenant(self):
         tenant = SimpleNamespace(id="tenant-42")
         plan = SimpleNamespace(code="PRO")
-        self.assertEqual(
-            self.adapter.create_subscription(tenant, plan), "mock_sub_tenant-42"
-        )
+        created = self.adapter.create_subscription(tenant, plan)
+        self.assertEqual(created.external_subscription_id, "mock_sub_tenant-42")
+        self.assertEqual(created.provider, "mock")
 
     def test_signature_flags_default_true(self):
         self.assertTrue(self.adapter.verify_webhook_signature({}, b"{}"))

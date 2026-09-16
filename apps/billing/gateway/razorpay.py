@@ -19,6 +19,7 @@ from apps.billing.gateway.base import (
     EventType,
     NormalizedEvent,
     PaymentGatewayAdapter,
+    ProviderCheckout,
     ProviderSubscriptionState,
     ProviderSubscriptionStatus,
     ProviderUnavailable,
@@ -108,7 +109,7 @@ class RazorpayGatewayAdapter(PaymentGatewayAdapter):
         )
         return created["id"]
 
-    def create_subscription(self, tenant, plan) -> str:
+    def create_subscription(self, tenant, plan) -> ProviderCheckout:
         created = self._client().subscription.create(
             {
                 "plan_id": plan.external_plan_id,
@@ -117,7 +118,23 @@ class RazorpayGatewayAdapter(PaymentGatewayAdapter):
                 "notes": {"tenant_id": str(tenant.id)},
             }
         )
-        return created["id"]
+        # Razorpay Checkout opens with the PUBLISHABLE key id and the
+        # subscription id; there is no session token in its model.
+        return ProviderCheckout(
+            provider="razorpay",
+            external_subscription_id=created["id"],
+            session_token="",
+            public_key=settings.RAZORPAY_KEY_ID,
+            mode="sandbox" if settings.RAZORPAY_KEY_ID.startswith("rzp_test") else "production",
+        )
+
+    def confirm_checkout_report(self, external_subscription_id, report) -> bool:
+        """Razorpay signs its success callback, so the report verifies itself."""
+        return self.verify_checkout_signature(
+            str(report.get("razorpay_payment_id") or ""),
+            external_subscription_id,
+            str(report.get("razorpay_signature") or ""),
+        )
 
     def verify_webhook_signature(self, headers, raw_body: bytes) -> bool:
         secret = settings.RAZORPAY_WEBHOOK_SECRET

@@ -46,21 +46,35 @@ class CheckoutStartSerializer(serializers.Serializer):
 
 class CheckoutConfirmSerializer(serializers.Serializer):
     """
-    Input for POST /api/subscriptions/current/confirm-checkout/ — the three
-    values Razorpay Checkout hands back on success. All required; the view
-    verifies the signature and never trusts them for state changes.
+    Input for POST /api/subscriptions/current/confirm-checkout/ — what the
+    browser reports when a provider's checkout finishes.
+
+    Only the subscription id is required, and even that is checked against OUR
+    stored checkout rather than believed. Razorpay's two signature fields stay
+    optional because Cashfree's subscription return carries no signed payload
+    at all — the adapter decides what, if anything, in this report is worth
+    reading. Nothing here ever drives a state change.
     """
 
-    razorpay_payment_id = serializers.CharField()
-    razorpay_subscription_id = serializers.CharField()
-    razorpay_signature = serializers.CharField()
+    subscription_id = serializers.CharField(required=False, allow_blank=True)
+    razorpay_subscription_id = serializers.CharField(required=False, allow_blank=True)
+    razorpay_payment_id = serializers.CharField(required=False, allow_blank=True)
+    razorpay_signature = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        if not (attrs.get("subscription_id") or attrs.get("razorpay_subscription_id")):
+            raise serializers.ValidationError(
+                {"subscription_id": ["This field is required."]}
+            )
+        return attrs
 
 
 class SubscriptionCheckoutSerializer(serializers.ModelSerializer):
     """
     Output for the checkout-start response — what the frontend needs to open
-    Razorpay Checkout. The public key id is added by the view (it's a setting,
-    not a model field); the API secret NEVER crosses this boundary.
+    the active provider's checkout. The publishable key id is added by the view
+    (it's a setting, not a model field); no API secret EVER crosses this
+    boundary, for either provider.
 
     The model field is now `external_subscription_id`, but the JSON key stays
     `razorpay_subscription_id` — the frontend (and Razorpay Checkout's
@@ -71,11 +85,24 @@ class SubscriptionCheckoutSerializer(serializers.ModelSerializer):
     razorpay_subscription_id = serializers.CharField(
         source="external_subscription_id", read_only=True
     )
+    #: Provider-neutral names — what a non-Razorpay frontend reads. The
+    #: razorpay_* key above is kept alongside them so the existing contract
+    #: (and Razorpay Checkout's own `subscription_id` option) is unbroken.
+    subscription_id = serializers.CharField(
+        source="external_subscription_id", read_only=True
+    )
     plan = PlanSerializer(read_only=True)
 
     class Meta:
         model = SubscriptionCheckout
-        fields = ["razorpay_subscription_id", "plan", "status"]
+        fields = [
+            "razorpay_subscription_id",
+            "subscription_id",
+            "provider",
+            "session_token",
+            "plan",
+            "status",
+        ]
 
 
 class SubscriptionUpdateSerializer(serializers.Serializer):

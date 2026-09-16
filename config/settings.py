@@ -232,9 +232,28 @@ RAZORPAY_KEY_SECRET = os.environ.get("RAZORPAY_KEY_SECRET", "")
 RAZORPAY_WEBHOOK_SECRET = os.environ.get("RAZORPAY_WEBHOOK_SECRET", "")
 
 # Which PaymentGatewayAdapter apps.billing talks to (payment-gateway-adapter
-# -spec.md §4.4). "razorpay" (real SDK) or "mock" (no network, no credentials —
-# for local dev and the automated suite).
+# -spec.md §4.4). "razorpay" (real SDK), "cashfree" (Cashfree Subscriptions —
+# recurring mandates) or "mock" (no network, no credentials — for local dev and
+# the automated suite).
 PAYMENT_GATEWAY = os.environ.get("PAYMENT_GATEWAY", "razorpay")
+
+# Cashfree SUBSCRIPTIONS — the Tenora subscription domain (owner -> Tenora).
+# Separate from the CASHFREE_* settings further down, which belong to P9's
+# property payments (resident -> owner): a different Cashfree API family, a
+# different webhook route, and credentials an operator may well want to keep
+# distinct. Empty defaults fail closed, like every other credential here.
+CASHFREE_SUBSCRIPTION_CLIENT_ID = os.environ.get("CASHFREE_SUBSCRIPTION_CLIENT_ID", "")
+# Also the webhook signing key: Cashfree signs with the client secret.
+CASHFREE_SUBSCRIPTION_CLIENT_SECRET = os.environ.get("CASHFREE_SUBSCRIPTION_CLIENT_SECRET", "")
+CASHFREE_SUBSCRIPTION_ENVIRONMENT = os.environ.get("CASHFREE_SUBSCRIPTION_ENVIRONMENT", "sandbox")
+CASHFREE_SUBSCRIPTION_API_VERSION = os.environ.get("CASHFREE_SUBSCRIPTION_API_VERSION", "2026-01-01")
+CASHFREE_SUBSCRIPTION_WEBHOOK_TOLERANCE_SECONDS = int(
+    os.environ.get("CASHFREE_SUBSCRIPTION_WEBHOOK_TOLERANCE_SECONDS", "300")
+)
+# How long a checkout session stays openable before the owner must start again.
+CASHFREE_SUBSCRIPTION_SESSION_TTL_MINUTES = int(
+    os.environ.get("CASHFREE_SUBSCRIPTION_SESSION_TTL_MINUTES", "60")
+)
 
 # --- P9: online resident payments for PROPERTY bills (resident -> owner) ------
 # A separate gateway, separate credentials and a separate webhook route from the

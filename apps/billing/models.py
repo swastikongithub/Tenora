@@ -157,6 +157,13 @@ class SubscriptionCheckout(models.Model):
     status = models.CharField(
         max_length=10, choices=Status.choices, default=Status.CREATED
     )
+    # Which adapter created this checkout, and the one-shot token its browser
+    # SDK needs (Cashfree's `subscription_session_id`). Razorpay has no such
+    # token and leaves it blank — its checkout opens from the subscription id
+    # plus a publishable key, which is a setting, not per-checkout state.
+    # Blank, never null: an absent token and an empty one mean the same thing.
+    provider = models.CharField(max_length=20, blank=True, default="")
+    session_token = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -11,6 +11,7 @@ import json
 
 from apps.billing.gateway.base import (
     EventType,
+    ProviderCheckout,
     NormalizedEvent,
     PaymentGatewayAdapter,
     ProviderSubscriptionState,
@@ -43,8 +44,17 @@ class MockGatewayAdapter(PaymentGatewayAdapter):
     def create_plan(self, plan) -> str:
         return f"mock_plan_{plan.code}"
 
-    def create_subscription(self, tenant, plan) -> str:
-        return f"mock_sub_{tenant.id}"
+    def create_subscription(self, tenant, plan) -> ProviderCheckout:
+        return ProviderCheckout(
+            provider="mock",
+            external_subscription_id=f"mock_sub_{tenant.id}",
+            session_token=f"mock_session_{tenant.id}",
+            public_key="mock_key",
+            mode="sandbox",
+        )
+
+    def confirm_checkout_report(self, external_subscription_id, report) -> bool:
+        return self.checkout_signature_valid
 
     def verify_webhook_signature(self, headers, raw_body: bytes) -> bool:
         return self.webhook_signature_valid

@@ -18,7 +18,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import AccessToken
 
-from apps.billing.gateway import PaymentGatewayAdapter
+from apps.billing.gateway import PaymentGatewayAdapter, ProviderCheckout
 from apps.billing.models import Plan, Subscription, SubscriptionCheckout
 from apps.billing.services import CheckoutService
 from apps.tenants.models import Membership, Tenant
@@ -63,9 +63,15 @@ class CheckoutTestBase(APITestCase):
         )
 
 
-def _gateway(sub_id="sub_MOCK"):
+def _gateway(sub_id="sub_MOCK", provider="razorpay", session_token=""):
     gw = mock.Mock(spec=PaymentGatewayAdapter)
-    gw.create_subscription.return_value = sub_id
+    gw.create_subscription.return_value = ProviderCheckout(
+        provider=provider,
+        external_subscription_id=sub_id,
+        session_token=session_token,
+        public_key="rzp_test_key",
+        mode="sandbox",
+    )
     return gw
 
 
@@ -114,9 +120,18 @@ class CheckoutStartTests(CheckoutTestBase):
 
         resp = self.client.post(START_URL, {"plan_id": str(self.pro.id)})
 
+        # The original Razorpay keys are all still present and unchanged; the
+        # provider-neutral ones sit alongside them for a non-Razorpay frontend.
+        self.assertLessEqual(
+            {"razorpay_subscription_id", "plan", "status", "razorpay_key_id"},
+            set(resp.data),
+        )
         self.assertEqual(
             set(resp.data),
-            {"razorpay_subscription_id", "plan", "status", "razorpay_key_id"},
+            {
+                "razorpay_subscription_id", "razorpay_key_id", "subscription_id",
+                "provider", "session_token", "checkout_mode", "plan", "status",
+            },
         )
         self.assertEqual(set(resp.data["plan"]), {
             "id", "name", "code", "price_cents", "currency", "interval",

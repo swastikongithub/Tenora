@@ -30,9 +30,19 @@ These were each deliberated and corrected during design. Do not "fix" them back.
   external call (create plan/subscription, verify webhook/checkout signatures,
   parse+normalize a webhook) goes through `apps.billing.gateway.get_gateway()`,
   which returns the adapter named by `settings.PAYMENT_GATEWAY` (`razorpay` |
-  `mock`). All Razorpay-specific SDK calls, HMAC constructions, header names and
-  event-name→`EventType` mapping live in `apps.billing.gateway.razorpay` — the
-  one and only module that imports `razorpay`. Tests use `MockGatewayAdapter`
+  `cashfree` | `mock`). All Razorpay-specific SDK calls, HMAC constructions,
+  header names and event-name→`EventType` mapping live in
+  `apps.billing.gateway.razorpay` — the one and only module that imports
+  `razorpay`. `cashfree` is Cashfree SUBSCRIPTIONS (recurring mandates — UPI
+  AutoPay / card / eNACH) in `apps.billing.gateway.cashfree`, with its own
+  `CASHFREE_SUBSCRIPTION_*` settings and webhook route
+  (`/api/webhooks/cashfree/subscriptions/`). It shares NOTHING with P9's
+  property-payment Cashfree adapter — different API family, credentials, route
+  and event vocabulary; neither imports the other. `create_subscription`
+  returns a `ProviderCheckout` (what the browser needs to open that provider's
+  checkout — never a secret), and `confirm_checkout_report` is how each adapter
+  decides whether a browser's success report can be believed (Razorpay verifies
+  its signature; Cashfree re-reads the mandate). Tests use `MockGatewayAdapter`
   (via `@override_settings(PAYMENT_GATEWAY="mock")` or patching `get_gateway`).
 - **Subscription status changes only via `SubscriptionService`.** Never assign
   `.status = ...` directly. Legal transitions are an explicit table. `CANCELED` is

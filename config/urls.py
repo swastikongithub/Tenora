@@ -20,8 +20,8 @@ from apps.billing.views import (
     ConfirmCheckoutView,
     CurrentSubscriptionView,
     PlanListView,
-    RazorpayWebhookView,
     StartCheckoutView,
+    SubscriptionWebhookView,
 )
 from apps.platform.views import (
     PlatformAuditLogListView,
@@ -421,11 +421,23 @@ urlpatterns = [
     # frontend never calls.
     path(
         "api/webhooks/razorpay/",
-        RazorpayWebhookView.as_view(),
+        SubscriptionWebhookView.as_view(),
         name="razorpay_webhook",
     ),
+    # Cashfree Subscriptions for the TENORA subscription (owner -> Tenora).
+    # Its own route because Cashfree registers subscription webhooks separately
+    # from payment ones, and because a route per provider keeps each one's
+    # signature scheme and event vocabulary pinned to the adapter that owns it.
+    # The view itself stays provider-neutral: it verifies and parses through
+    # whichever adapter `PAYMENT_GATEWAY` names, so this route is live only
+    # while that is "cashfree".
+    path(
+        "api/webhooks/cashfree/subscriptions/",
+        SubscriptionWebhookView.as_view(),
+        name="cashfree_subscription_webhook",
+    ),
     # P9: property-bill payments (resident -> owner). A separate route, gateway
-    # and verification from the subscription webhook above; same no-auth,
+    # and verification from the subscription webhooks above; same no-auth,
     # not-in-GLOBAL_PATHS arrangement for the same reason.
     path(
         "api/webhooks/cashfree/property-payments/",

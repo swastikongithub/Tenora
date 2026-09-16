@@ -35,7 +35,7 @@
  * version is a D3 concern, once webhook-driven activation exists to clear it.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 
@@ -48,6 +48,7 @@ import { queryKeys } from '../lib/query-keys'
 import { useTenant } from '../lib/tenant'
 import { CancelSubscriptionModal } from './CancelSubscriptionModal'
 import { ChangePlanConfirmModal } from './ChangePlanConfirmModal'
+import { openCashfreeSubscriptionCheckout } from './cashfreeSubscriptionCheckout'
 import { PlanGrid } from './PlanGrid'
 import {
   useRazorpayCheckout,
@@ -80,9 +81,43 @@ export interface Subscription {
 }
 
 interface CheckoutStartResponse {
+  /** Provider-neutral fields (the backend sends both shapes). */
+  provider: string
+  subscription_id: string
+  /** Cashfree's one-shot mandate session; empty for Razorpay. */
+  session_token: string
+  checkout_mode: 'sandbox' | 'production'
   razorpay_subscription_id: string
   razorpay_key_id: string
   plan: Plan
+}
+
+/**
+ * A Cashfree mandate leaves the app entirely (its hosted page redirects this
+ * tab) and comes back with nothing in the URL we could trust, so the id of the
+ * checkout we started is parked for the return trip. Per-tab and short-lived:
+ * it is read exactly once, and it proves nothing on its own — the server
+ * re-reads the mandate from Cashfree before believing any of it.
+ */
+const PENDING_CHECKOUT_KEY = 'tenora.pending_subscription_checkout'
+
+function rememberPendingCheckout(subscriptionId: string) {
+  try {
+    sessionStorage.setItem(PENDING_CHECKOUT_KEY, subscriptionId)
+  } catch {
+    // Private mode / blocked storage: the webhook still activates the
+    // subscription, the page just won't show "processing" on return.
+  }
+}
+
+function takePendingCheckout(): string | null {
+  try {
+    const value = sessionStorage.getItem(PENDING_CHECKOUT_KEY)
+    if (value) sessionStorage.removeItem(PENDING_CHECKOUT_KEY)
+    return value
+  } catch {
+    return null
+  }
 }
 
 /** Ephemeral state of a just-started checkout (not persisted — see file header). */
@@ -122,6 +157,16 @@ export function SubscriptionPage() {
   const [submitting, setSubmitting] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [checkoutState, setCheckoutState] = useState<CheckoutState>(null)
+
+  // Returning from Cashfree's hosted mandate page: ask the server what became
+  // of the checkout we parked before leaving. Runs once per return.
+  const returnHandled = useRef(false)
+  useEffect(() => {
+    if (returnHandled.current) return
+    returnHandled.current = true
+    const pending = takePendingCheckout()
+    if (pending) void confirmCheckout({ subscription_id: pending })
+  }, [])
   const { openCheckout } = useRazorpayCheckout()
 
   const {
@@ -186,15 +231,26 @@ export function SubscriptionPage() {
     setActionError(null)
     setCheckoutState(null)
     try {
-      const { razorpay_subscription_id, razorpay_key_id } =
-        await apiClient.post<CheckoutStartResponse>(
-          '/subscriptions/current/checkout/',
-          { plan_id: plan.id },
-        )
+      const started = await apiClient.post<CheckoutStartResponse>(
+        '/subscriptions/current/checkout/',
+        { plan_id: plan.id },
+      )
       setSubmitting(false)
+      if (started.provider === 'cashfree') {
+        // Cashfree authorises a recurring mandate on its own hosted page and
+        // redirects back to /subscription. There is no success callback to
+        // report, so the confirm step runs on return (see the effect below)
+        // and, as always, only the webhook actually activates anything.
+        rememberPendingCheckout(started.subscription_id)
+        await openCashfreeSubscriptionCheckout(
+          started.session_token,
+          started.checkout_mode,
+        )
+        return
+      }
       openCheckout({
-        keyId: razorpay_key_id,
-        subscriptionId: razorpay_subscription_id,
+        keyId: started.razorpay_key_id,
+        subscriptionId: started.razorpay_subscription_id,
         planName: plan.name,
         workspaceName: currentTenant?.name ?? 'this workspace',
         onConfirmed: (payload) => void confirmCheckout(payload),
@@ -207,7 +263,7 @@ export function SubscriptionPage() {
     }
   }
 
-  async function confirmCheckout(payload: CheckoutSuccessPayload) {
+  async function confirmCheckout(payload: CheckoutSuccessPayload | { subscription_id: string }) {
     try {
       // The backend only verifies the handshake — it does NOT activate
       // anything. "processing", never "active".

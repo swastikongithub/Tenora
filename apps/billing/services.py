@@ -243,16 +243,21 @@ class CheckoutService:
                     return checkout  # reuse — a second click re-opens the same Checkout
                 raise CheckoutPlanMismatch()
 
-            external_subscription_id = get_gateway().create_subscription(
-                tenant, plan
-            )
+            created = get_gateway().create_subscription(tenant, plan)
             checkout.plan = plan
-            checkout.external_subscription_id = external_subscription_id
+            checkout.external_subscription_id = created.external_subscription_id
+            checkout.provider = created.provider
+            # Providers that hand back a one-shot checkout token (Cashfree) need
+            # it kept: a second click must re-open the SAME authorisation rather
+            # than raise a second mandate against the owner.
+            checkout.session_token = created.session_token
             checkout.status = SubscriptionCheckout.Status.CREATED
             checkout.save(
                 update_fields=[
                     "plan",
                     "external_subscription_id",
+                    "provider",
+                    "session_token",
                     "status",
                     "updated_at",
                 ]
@@ -260,15 +265,20 @@ class CheckoutService:
             return checkout
 
     @staticmethod
-    def confirm_checkout(tenant, payment_id, subscription_id, signature):
+    def confirm_checkout(tenant, subscription_id, report):
         """
-        Verify the checkout success callback for this tenant's checkout. On
-        success, mark the `SubscriptionCheckout` CONFIRMED — a UI-feedback /
-        audit flag, NOT a subscription activation. Returns nothing; raises
-        `SubscriptionCheckout.DoesNotExist` if there's no checkout, or
-        `CheckoutSignatureInvalid` on a bad/tampered/mismatched signature.
+        Check the browser's "checkout finished" report for this tenant's
+        checkout. On success, mark the `SubscriptionCheckout` CONFIRMED — a
+        UI-feedback / audit flag, NOT a subscription activation. Returns
+        nothing; raises `SubscriptionCheckout.DoesNotExist` if there's no
+        checkout, or `CheckoutSignatureInvalid` when the report can't be
+        believed.
 
-        Never creates or touches a local `Subscription` row.
+        HOW it is checked is the adapter's business: Razorpay verifies the
+        signature it signed the callback with; Cashfree signs no callback and
+        re-reads the mandate from its API instead. Either way this never
+        creates or touches a local `Subscription` row — only a verified webhook
+        does that.
         """
         checkout = SubscriptionCheckout.objects.for_tenant(tenant).get()
 
@@ -278,9 +288,7 @@ class CheckoutService:
         stored_id = checkout.external_subscription_id
         if not stored_id or subscription_id != stored_id:
             raise CheckoutSignatureInvalid()
-        if not get_gateway().verify_checkout_signature(
-            payment_id, stored_id, signature
-        ):
+        if not get_gateway().confirm_checkout_report(stored_id, report):
             raise CheckoutSignatureInvalid()
 
         if checkout.status != SubscriptionCheckout.Status.CONFIRMED:

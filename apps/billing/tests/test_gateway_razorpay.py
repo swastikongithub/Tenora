@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest import mock
 
+from django.conf import settings
 from django.test import SimpleTestCase, override_settings
 
 import razorpay
@@ -80,7 +81,13 @@ class RazorpayCreateCallsTests(SimpleTestCase):
 
         result = self.adapter.create_subscription(tenant, _plan())
 
-        self.assertEqual(result, "sub_NEW")
+        # The adapter now returns what the browser needs to OPEN the checkout,
+        # not a bare id: for Razorpay that is the subscription id plus the
+        # PUBLISHABLE key — never the secret.
+        self.assertEqual(result.external_subscription_id, "sub_NEW")
+        self.assertEqual(result.provider, "razorpay")
+        self.assertEqual(result.session_token, "")
+        self.assertEqual(result.public_key, settings.RAZORPAY_KEY_ID)
         body = self.client.subscription.create.call_args.args[0]
         self.assertEqual(body["plan_id"], "plan_EXT")
         self.assertEqual(body["total_count"], 120)  # MONTHLY ≈ 10 years
