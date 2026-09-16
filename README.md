@@ -284,10 +284,26 @@ where the edges are.
 - **Duplicate webhook replay was not verified live** — the Cashfree dashboard's
   webhook log was unavailable at the time. It is covered by a unique constraint
   on the delivery digest, two further idempotency guards, and an automated test.
-- **The Cashfree subscription flow is deployed and its plans are synced**
-  (`tenora_basic_monthly`, `tenora_pro_monthly`, `tenora_pro_annual`), but a
-  full sandbox mandate authorisation has not been completed yet, so the
-  subscription rules are proven by tests rather than by a live run.
+- **Cashfree subscriptions are verified end to end** against the deployed
+  backend and the real sandbox: the three plans are synced
+  (`tenora_basic_monthly`, `tenora_pro_monthly`, `tenora_pro_annual`), a mandate
+  was authorised in the browser, and its signed webhook activated exactly one
+  subscription on the intended plan through `SubscriptionService`. The
+  downgrade and billing-cycle refusals were confirmed on production too.
+- **Returning from the Cashfree mandate page renders a blank `/subscription`.**
+  Cosmetic but real: the webhook has already activated the subscription by
+  then, so no state is lost — the page just fails to show it. Not yet
+  diagnosed.
+- **Subscription period dates can start a cycle late.** A subscription created
+  on 16 Sep came back with `current_period_start` of 16 Oct, because the period
+  is taken from the CHARGED event's `next_schedule_date` rather than the cycle
+  actually being paid for.
+- **A CHARGED event that overtakes its own ACTIVATED stays unprocessed.** When
+  the charge webhook lands a fraction of a second before the activation it
+  describes, there is no subscription to attach it to yet, so it waits in the
+  out-of-order retry window — which only the Celery sweep clears, and Render's
+  free tier runs no worker. `python manage.py process_webhook_events` is the
+  manual path. Subscription state is unaffected; the event is simply pending.
 - **Render's free tier runs no worker**, so scheduled Celery work does not
   execute in production; the management commands above are the manual path.
   See `docs/worker-scheduler-operations.md`.
